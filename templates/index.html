@@ -18,17 +18,19 @@ body{background-color:#f5f7fa;min-height:100vh;font-family:Microsoft YaHei,Arial
 .container{max-width:1400px;margin:0 auto;padding:20px}
 .card{background:white;border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,0.05);margin-bottom:20px;padding:20px}
 .card h3,.card h4{margin:0 0 15px 0;color:#333}
-.stat-card{background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 4px rgba(0,0,0,0.05);display:inline-block;margin-right:20px;min-width:120px}
+.stat-card{background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 4px rgba(0,0,0,0.05);display:inline-block;margin-right:20px;min-width:150px}
 .stat-card span{font-size:28px;font-weight:bold;color:#2a5298}
-.stat-card small{color:#666;font-size:14px}
+.stat-card small{color:#666;font-size:14px;display:block}
 .upload-zone{border:2px dashed #ccc;border-radius:12px;padding:40px;text-align:center;cursor:pointer;margin:20px 0}
 .upload-zone:hover{border-color:#2a5298;background:#f8f9ff}
 .upload-zone p{color:#666;margin:0}
 #filterSection{margin:20px 0;background:white;border-radius:12px;padding:15px 20px;box-shadow:0 2px 4px rgba(0,0,0,0.05)}
 #filterSection label{font-weight:bold;margin-right:20px}
-#filterSection select{padding:8px 16px;border-radius:8px;border:1px solid #ddd;margin-right:20px}
+#filterSection select{padding:8px 16px;border-radius:8px;border:1px solid #ddd;margin-right:20px;min-width:200px}
 #filterSection button{background:#28a745;color:white;border:none;padding:10px 20px;border-radius:8px;margin-left:10px;cursor:pointer}
 #filterSection button:hover{background:#218838}
+#filterSection button.btn-export{background:#2a5298}
+#filterSection button.btn-export:hover{background:#1e3c72}
 .chart-container{height:350px;width:100%}
 .loading-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,255,255,0.9);display:none;justify-content:center;align-items:center;z-index:9999}
 .spinner{width:50px;height:50px;border:4px solid #f3f3f3;border-top:4px solid #2a5298;border-radius:50%;animation:spin 1s linear infinite}
@@ -62,18 +64,19 @@ body{background-color:#f5f7fa;min-height:100vh;font-family:Microsoft YaHei,Arial
 </div>
 </div>
 <div id="filterSection" class="hidden">
-<label>选择月份: <select id="monthSelect" onchange="loadMonthData()"></select></label>
-<button onclick="exportExcel()"><i class="bi bi-file-earmark-excel"></i> 导出Excel</button>
+<label>选择月份: <select id="monthSelect"></select></label>
+<button onclick="loadMonthData()"><i class="bi bi-search"></i> 分析</button>
+<button onclick="exportExcel()" class="btn-export"><i class="bi bi-download"></i> 导出Excel</button>
 </div>
 <div id="statsRow" class="hidden">
-<div class="stat-card"><span id="statMonth">-</span><br><small>分析月份</small></div>
-<div class="stat-card"><span id="statAvgCount">-</span><br><small>平均人数</small></div>
-<div class="stat-card"><span id="statTurnoverCount">-</span><br><small>离职人数</small></div>
-<div class="stat-card"><span id="statTurnoverRate">-</span><br><small>离职率(%)</small></div>
+<div class="stat-card"><span id="statMonth">-</span><small>分析月份</small></div>
+<div class="stat-card"><span id="statAvgCount">-</span><small>平均人数</small></div>
+<div class="stat-card"><span id="statTurnoverCount">-</span><small>离职人数</small></div>
+<div class="stat-card"><span id="statTurnoverRate">-</span><small>离职率(%)</small></div>
 </div>
 <div id="chartsRow1" class="hidden">
-<div class="card"><h4>各部门离职率</h4><div id="chartTurnoverRate" class="chart-container"></div></div>
-<div class="card"><h4>离职类型分布</h4><div id="chartTurnoverType" class="chart-container"></div></div>
+<div class="card"><h4>各部门离职率与离职人数</h4><div id="chartDept" class="chart-container"></div></div>
+<div class="card"><h4>离职类型分布</h4><div id="chartType" class="chart-container"></div></div>
 </div>
 <div id="chartsRow2" class="hidden">
 <div class="card"><h4>离职司龄分布</h4><div id="chartTenure" class="chart-container"></div></div>
