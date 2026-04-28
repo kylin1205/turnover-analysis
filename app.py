@@ -33,25 +33,51 @@ class DataProcessor:
         self.turnover_data = None
         
     def load_file(self, filepath):
+        """加载Excel文件，适配特殊格式：
+        - "1月期初人数" → 1月 start
+        - "2月期初人数（1月期末人数）" → 1月 end, 2月 start
+        - "3月期末数据（4月..." → 3月 end
+        """
         xlsx = pd.ExcelFile(filepath)
         for sheet in xlsx.sheet_names:
             try:
                 df = pd.read_excel(xlsx, sheet_name=sheet)
-                month_num = extract_month_num(sheet)
                 
                 if sheet == "离职数据":
                     self.turnover_data = df.copy()
                     if '最后工作日' in df.columns:
                         self.turnover_data['最后工作日'] = pd.to_datetime(df['最后工作日'], errors='coerce')
                         self.turnover_data['离职月份'] = self.turnover_data['最后工作日'].dt.strftime('%Y年%m月')
+                    continue
                 
-                elif month_num is not None:
-                    if month_num not in self.period_data:
-                        self.period_data[month_num] = {'start': None, 'end': None}
-                    if "期末" in sheet:
-                        self.period_data[month_num]['end'] = df
-                    else:
-                        self.period_data[month_num]['start'] = df
+                # 解析外层月份 (第一个数字)
+                outer_match = re.search(r'^(\d{1,2})月', sheet)
+                if not outer_match:
+                    continue
+                outer_month = int(outer_match.group(1))
+                
+                # 解析括号内月份 (格式: "（X月期末人数" 或 "（4月期初数据"...)
+                inner_match = re.search(r'（(\d{1,2})月', sheet)
+                
+                # 解析内层月份 - 括号内有期末标记
+                inner_end_match = re.search(r'（(\d{1,2})月[^）]*期末', sheet)
+                if inner_end_match:
+                    prev_month = int(inner_end_match.group(1))
+                    if prev_month not in self.period_data:
+                        self.period_data[prev_month] = {'start': None, 'end': None}
+                    self.period_data[prev_month]['end'] = df
+                # 解析"3月期末数据（4月期初数据）"格式 - 外层有期末标记
+                elif "期末" in sheet:
+                    if outer_month not in self.period_data:
+                        self.period_data[outer_month] = {'start': None, 'end': None}
+                    self.period_data[outer_month]['end'] = df
+                
+                # 期初数据 - 括号内是期初或外层是期初
+                if "期初" in sheet or (inner_match and "期末" not in sheet):
+                    if outer_month not in self.period_data:
+                        self.period_data[outer_month] = {'start': None, 'end': None}
+                    self.period_data[outer_month]['start'] = df
+                    
             except Exception as e:
                 continue
     
