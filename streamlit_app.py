@@ -44,7 +44,9 @@ def categorize_tenure(df):
 
 
 def get_monthly_analysis(month, turnover_data, months, monthly_data):
-    if turnover_data is None: return None
+    if turnover_data is None:
+        st.error("未找到离职数据！请确保Excel包含离职类型列")
+        return None
     month_turnover = turnover_data[turnover_data['离职月份'] == month].copy()
     month_idx = months.index(month) if month in months else -1
     start_count = len(monthly_data.get(month, pd.DataFrame()))
@@ -101,26 +103,48 @@ def get_monthly_analysis(month, turnover_data, months, monthly_data):
 
 
 uploaded_file = st.file_uploader("上传Excel文件", type=['xlsx', 'xls'])
+
 if uploaded_file:
+    st.info(f"已上传文件: {uploaded_file.name}")
     xlsx = pd.ExcelFile(uploaded_file)
+    st.write(f"发现 {len(xlsx.sheet_names)} 个工作表:", xlsx.sheet_names)
+    
     monthly_data = {}
     turnover_data = None
+    
     for sheet in xlsx.sheet_names:
         try:
             df = pd.read_excel(xlsx, sheet_name=sheet)
+            st.write(f"正在检查工作表 '{sheet}'，列: {list(df.columns)[:5]}...")
+            
             if '姓名' in df.columns and '身份类别' in df.columns:
                 month = extract_month(sheet)
-                if month: monthly_data[month] = df[df['身份类别'] != '实习生'].copy()
+                if month:
+                    df_filtered = df[df['身份类别'] != '实习生'].copy()
+                    monthly_data[month] = df_filtered
+                    st.success(f"找到人员清单: {sheet} -> {month}, 人数: {len(df_filtered)}")
+                else:
+                    st.warning(f"工作表 '{sheet}' 包含人员数据但无法识别月份格式")
+            
             elif '离职类型' in df.columns:
                 turnover_data = df
                 if '最后工作日' in turnover_data.columns:
                     turnover_data['最后工作日'] = pd.to_datetime(turnover_data['最后工作日'], errors='coerce')
                 if '离职月份' not in turnover_data.columns:
                     turnover_data['离职月份'] = turnover_data['最后工作日'].dt.strftime('%Y年%m月')
-        except: continue
+                st.success(f"找到离职数据: {sheet}, 记录数: {len(turnover_data)}")
+        except Exception as e:
+            st.error(f"处理工作表 '{sheet}' 时出错: {str(e)}")
+    
+    st.write("---")
+    st.write(f"解析完成: 发现 {len(monthly_data)} 个月的人员数据")
     
     months = sorted(monthly_data.keys(), reverse=True)
-    if months:
+    
+    if not months:
+        st.error("未找到有效的人员数据！")
+        st.warning("请确保Excel工作表名称包含年月格式，如: '2026年01月' 或 '202601'")
+    else:
         selected_month = st.selectbox("选择分析月份", months)
         if st.button("开始分析"):
             analysis = get_monthly_analysis(selected_month, turnover_data, months, monthly_data)
