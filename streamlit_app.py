@@ -25,7 +25,6 @@ def analyze(month_num, period_data, turnover_data):
     start_df = period_data.get(month_num, {}).get('start')
     end_df = period_data.get(month_num, {}).get('end')
     
-    # 安全处理 None
     if start_df is None or len(start_df) == 0:
         st.error("未找到该月期初数据"); return None
     
@@ -34,46 +33,47 @@ def analyze(month_num, period_data, turnover_data):
     avg_cnt = (start_cnt + end_cnt) / 2
     
     month_turn = pd.DataFrame()
-    if turnover_data is not None:
-        mask = turnover_data['离职月份'] == ms if '离职月份' in turnover_data.columns else pd.Series([False]*len(turnover_data))
-        month_turn = turnover_data[mask].copy()
+    if turnover_data is not None and '离职月份' in turnover_data.columns:
+        month_turn = turnover_data[turnover_data['离职月份'] == ms].copy()
     turn_cnt = len(month_turn)
     turn_rate = round((turn_cnt / avg_cnt * 100), 2) if avg_cnt > 0 else 0
     
-    # 各部门
     dept_df = pd.DataFrame()
     if len(month_turn) > 0 and '一级组织' in month_turn.columns:
         d1 = month_turn.groupby('一级组织').size().reset_index(name='离职人数')
         d2 = pd.DataFrame()
-        d3 = pd.DataFrame()
         if start_df is not None and '一级组织' in start_df.columns:
             d2 = start_df.groupby('一级组织').size().reset_index(name='期初人数')
+        d3 = pd.DataFrame()
         if end_df is not None and len(end_df) > 0 and '一级组织' in end_df.columns:
             d3 = end_df.groupby('一级组织').size().reset_index(name='期末人数')
         dept_df = d1.copy()
-        if len(d2) > 0: dept_df = dept_df.merge(d2, on='一级组织', how='left')
-        if len(d3) > 0: dept_df = dept_df.merge(d3, on='一级组织', how='left')
+        if len(d2) > 0:
+            dept_df = dept_df.merge(d2, on='一级组织', how='left')
+        else:
+            dept_df['期初人数'] = 0
+        if len(d3) > 0:
+            dept_df = dept_df.merge(d3, on='一级组织', how='left')
+        else:
+            dept_df['期末人数'] = dept_df['期初人数']
         dept_df['期初人数'] = dept_df['期初人数'].fillna(0).astype(int)
         dept_df['期末人数'] = dept_df['期末人数'].fillna(0).astype(int)
         dept_df['平均人数'] = (dept_df['期初人数'] + dept_df['期末人数']) / 2
         dept_df['离职率(%)'] = dept_df.apply(lambda x: round((x['离职人数']/x['平均人数']*100) if x['平均人数']>0 else 0, 2), axis=1)
         dept_df = dept_df.sort_values('离职率(%)', ascending=False)
     
-    # 离职类型
     type_df = pd.DataFrame()
     if len(month_turn) > 0 and '离职类型' in month_turn.columns:
         type_df = month_turn.groupby('离职类型').size().reset_index(name='人数')
         type_df['占比(%)'] = round(type_df['人数']/turn_cnt*100, 2) if turn_cnt > 0 else 0
         type_df = type_df.sort_values('人数', ascending=False)
     
-    # 离职原因
     reason_df = pd.DataFrame()
     if len(month_turn) > 0 and '离职原因' in month_turn.columns:
         reason_df = month_turn.groupby('离职原因').size().reset_index(name='人数')
         reason_df['占比(%)'] = round(reason_df['人数']/turn_cnt*100, 2) if turn_cnt > 0 else 0
         reason_df = reason_df.sort_values('人数', ascending=False)
     
-    # 职级
     level_df = pd.DataFrame()
     if len(month_turn) > 0 and '职级' in month_turn.columns:
         level_df = month_turn.groupby('职级').size().reset_index(name='人数')
@@ -83,7 +83,6 @@ def analyze(month_num, period_data, turnover_data):
     return {'month': ms, 'start': start_cnt, 'end': end_cnt, 'avg': round(avg_cnt, 2), 'turn_cnt': turn_cnt, 'turn_rate': turn_rate,
             'dept': dept_df, 'type': type_df, 'reason': reason_df, 'level': level_df}
 
-# 上传
 f = st.file_uploader("上传Excel", type=['xlsx', 'xls'])
 if f:
     st.info("已上传: " + f.name)
@@ -147,4 +146,4 @@ if f:
                         if len(r['type']) > 0: r['type'].to_excel(w, sheet_name='离职类型', index=False)
                         if len(r['reason']) > 0: r['reason'].to_excel(w, sheet_name='离职原因', index=False)
                         if len(r['level']) > 0: r['level'].to_excel(w, sheet_name='职级', index=False)
-                    st.downloadbutton("下载Excel", out.getvalue(), r["month"]+"离职分析.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    st.download_button("下载Excel", out.getvalue(), r["month"]+"离职分析.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
