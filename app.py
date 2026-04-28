@@ -1,28 +1,20 @@
 """
 员工离职数据分析系统 - Flask版本
 离职率 = 离职人数 ÷ 平均人数
-平均人数 = (期初人数 + 期末人数) / 2
+支持月份单选或多月汇总分析
 """
 from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import pandas as pd
-import numpy as np
 import os
 import re
-from datetime import datetime
 from io import BytesIO
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = '/tmp'
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
-
+app.config["UPLOAD_FOLDER"] = "/tmp"
 processor = None
-
-def extract_month_num(sheet_name):
-    match = re.search(r'(\d{1,2})月', str(sheet_name))
-    return int(match.group(1)) if match else None
 
 def get_month_str(month_num):
     return "2026年" + str(month_num).zfill(2) + "月"
@@ -33,241 +25,185 @@ class DataProcessor:
         self.turnover_data = None
         
     def load_file(self, filepath):
-        """加载Excel文件，适配特殊格式：
-        - "1月期初人数" → 1月 start
-        - "2月期初人数（1月期末人数）" → 1月 end, 2月 start
-        - "3月期末数据（4月..." → 3月 end
-        """
         xlsx = pd.ExcelFile(filepath)
         for sheet in xlsx.sheet_names:
             try:
                 df = pd.read_excel(xlsx, sheet_name=sheet)
-                
                 if sheet == "离职数据":
                     self.turnover_data = df.copy()
-                    if '最后工作日' in df.columns:
-                        self.turnover_data['最后工作日'] = pd.to_datetime(df['最后工作日'], errors='coerce')
-                        self.turnover_data['离职月份'] = self.turnover_data['最后工作日'].dt.strftime('%Y年%m月')
+                    if "最后工作日" in df.columns:
+                        self.turnover_data["最后工作日"] = pd.to_datetime(df["最后工作日"], errors="coerce")
+                        self.turnover_data["离职月份"] = self.turnover_data["最后工作日"].dt.strftime("%Y年%m月")
                     continue
-                
-                # 解析外层月份 (第一个数字)
-                outer_match = re.search(r'^(\d{1,2})月', sheet)
-                if not outer_match:
-                    continue
-                outer_month = int(outer_match.group(1))
-                
-                # 解析括号内月份 (格式: "（X月期末人数" 或 "（4月期初数据"...)
-                inner_match = re.search(r'（(\d{1,2})月', sheet)
-                
-                # 解析内层月份 - 括号内有期末标记
-                inner_end_match = re.search(r'（(\d{1,2})月[^）]*期末', sheet)
-                if inner_end_match:
-                    prev_month = int(inner_end_match.group(1))
-                    if prev_month not in self.period_data:
-                        self.period_data[prev_month] = {'start': None, 'end': None}
-                    self.period_data[prev_month]['end'] = df
-                # 解析"3月期末数据（4月期初数据）"格式 - 外层有期末标记
+                m = re.search(r"^(\d{1,2})月", sheet)
+                if not m: continue
+                outer_month = int(m.group(1))
+                inner = re.search(r"（(\d{1,2})月[^）]*期末", sheet)
+                if inner:
+                    pm = int(inner.group(1))
+                    if pm not in self.period_data: self.period_data[pm] = {"start": None, "end": None}
+                    self.period_data[pm]["end"] = df
                 elif "期末" in sheet:
-                    if outer_month not in self.period_data:
-                        self.period_data[outer_month] = {'start': None, 'end': None}
-                    self.period_data[outer_month]['end'] = df
-                
-                # 期初数据 - 括号内是期初或外层是期初
-                if "期初" in sheet or (inner_match and "期末" not in sheet):
-                    if outer_month not in self.period_data:
-                        self.period_data[outer_month] = {'start': None, 'end': None}
-                    self.period_data[outer_month]['start'] = df
-                    
-            except Exception as e:
-                continue
+                    if outer_month not in self.period_data: self.period_data[outer_month] = {"start": None, "end": None}
+                    self.period_data[outer_month]["end"] = df
+                if "期初" in sheet:
+                    if outer_month not in self.period_data: self.period_data[outer_month] = {"start": None, "end": None}
+                    self.period_data[outer_month]["start"] = df
+            except: pass
     
     def get_available_months(self):
-        return sorted([m for m in self.period_data.keys() if self.period_data[m]['start'] is not None], reverse=True)
+        return sorted([m for m in self.period_data.keys() if self.period_data[m]["start"] is not None])
     
     def get_summary(self):
         months = self.get_available_months()
-        total_turnover = len(self.turnover_data) if self.turnover_data is not None else 0
-        latest_month = months[0] if months else None
-        latest_count = len(self.period_data.get(latest_month, {}).get('start', pd.DataFrame())) if latest_month else 0
-        return {
-            'available_months': [get_month_str(m) for m in months],
-            'total_employees': latest_count,
-            'total_turnover': total_turnover
-        }
+        total = len(self.turnover_data) if self.turnover_data is not None else 0
+        latest = months[-1] if months else None
+        cnt = len(self.period_data.get(latest, {}).get("start", pd.DataFrame())) if latest else 0
+        options = []
+        for m in months: options.append({"value": get_month_str(m), "label": get_month_str(m), "months": [m]})
+        for i in range(len(months)):
+            for j in range(i + 1, len(months)):
+                if months[j] - months[i] == j - i:
+                    rms = list(range(months[i], months[j] + 1))
+                    label = get_month_str(months[i]) + "至" + get_month_str(months[j])
+                    options.append({"value": label, "label": label, "months": rms})
+        return {"available_months": [get_month_str(m) for m in months], "month_options": options, "total_employees": cnt, "total_turnover": total}
     
-    def get_monthly_analysis(self, month_num):
-        start_df = self.period_data.get(month_num, {}).get('start')
-        end_df = self.period_data.get(month_num, {}).get('end')
-        month_str = get_month_str(month_num)
-        
-        if start_df is None or len(start_df) == 0:
-            return None
-        
-        start_cnt = len(start_df)
-        end_cnt = len(end_df) if end_df is not None and len(end_df) > 0 else start_cnt
-        avg_cnt = (start_cnt + end_cnt) / 2
-        
-        month_turn = pd.DataFrame()
-        if self.turnover_data is not None and '离职月份' in self.turnover_data.columns:
-            month_turn = self.turnover_data[self.turnover_data['离职月份'] == month_str].copy()
-        turn_cnt = len(month_turn)
-        turn_rate = round((turn_cnt / avg_cnt * 100), 2) if avg_cnt > 0 else 0
-        
-        # 部门离职
-        dept_turnover = []
-        if len(month_turn) > 0 and '一级组织' in month_turn.columns:
-            d1 = month_turn.groupby('一级组织').size().reset_index(name='离职人数')
-            d2 = pd.DataFrame()
-            d3 = pd.DataFrame()
-            if '一级组织' in start_df.columns:
-                d2 = start_df.groupby('一级组织').size().reset_index(name='期初人数')
-            if end_df is not None and len(end_df) > 0 and '一级组织' in end_df.columns:
-                d3 = end_df.groupby('一级组织').size().reset_index(name='期末人数')
-            
-            dept = d1.copy()
-            if len(d2) > 0:
-                dept = dept.merge(d2, on='一级组织', how='left')
-            else:
-                dept['期初人数'] = 0
-            if len(d3) > 0:
-                dept = dept.merge(d3, on='一级组织', how='left')
-            else:
-                dept['期末人数'] = dept['期初人数']
-            dept['期初人数'] = dept['期初人数'].fillna(0).astype(int)
-            dept['期末人数'] = dept['期末人数'].fillna(0).astype(int)
-            dept['平均人数'] = (dept['期初人数'] + dept['期末人数']) / 2
-            dept['离职率(%)'] = dept.apply(lambda x: round((x['离职人数']/x['平均人数']*100) if x['平均人数']>0 else 0, 2), axis=1)
-            dept = dept.sort_values('离职率(%)', ascending=False)
-            dept_turnover = dept.to_dict('records')
-        
-        # 离职类型
-        type_data = []
-        if len(month_turn) > 0 and '离职类型' in month_turn.columns:
-            t = month_turn.groupby('离职类型').size().reset_index(name='人数')
-            t['占比'] = round(t['人数']/turn_cnt*100, 2) if turn_cnt > 0 else 0
-            t = t.sort_values('人数', ascending=False)
-            type_data = t.to_dict('records')
-        
-        # 离职原因
-        reason_data = []
-        if len(month_turn) > 0 and '离职原因' in month_turn.columns:
-            r = month_turn.groupby('离职原因').size().reset_index(name='人数')
-            r['占比'] = round(r['人数']/turn_cnt*100, 2) if turn_cnt > 0 else 0
-            r = r.sort_values('人数', ascending=False)
-            reason_data = r.to_dict('records')
-        
-        # 司龄
-        tenure_data = []
-        tenure_col = '累计司龄（年）'
-        if len(month_turn) > 0 and tenure_col in month_turn.columns:
+    def get_monthly_analysis(self, month_nums):
+        if not isinstance(month_nums, list): month_nums = [month_nums]
+        ts, te, tt = 0, 0, 0
+        all_turn = pd.DataFrame()
+        ds, de, dt = {}, {}, {}
+        for mn in month_nums:
+            sdf = self.period_data.get(mn, {}).get("start")
+            edf = self.period_data.get(mn, {}).get("end")
+            ms = get_month_str(mn)
+            if sdf is not None:
+                ts += len(sdf)
+                if "一级组织" in sdf.columns:
+                    for d, c in sdf.groupby("一级组织").size().items(): ds[d] = ds.get(d, 0) + c
+            if edf is not None and len(edf) > 0:
+                te += len(edf)
+                if "一级组织" in edf.columns:
+                    for d, c in edf.groupby("一级组织").size().items(): de[d] = de.get(d, 0) + c
+            if self.turnover_data is not None and "离职月份" in self.turnover_data.columns:
+                mt = self.turnover_data[self.turnover_data["离职月份"] == ms].copy()
+                tt += len(mt)
+                all_turn = pd.concat([all_turn, mt], ignore_index=True)
+                if "一级组织" in mt.columns:
+                    for d, c in mt.groupby("一级组织").size().items(): dt[d] = dt.get(d, 0) + c
+        avg = (ts + te) / 2 if (ts + te) > 0 else 0
+        rate = round((tt / avg * 100), 2) if avg > 0 else 0
+        lbl = get_month_str(month_nums[0]) if len(month_nums) == 1 else get_month_str(month_nums[0]) + "至" + get_month_str(month_nums[-1])
+        da = []
+        for dept in set(list(ds.keys()) + list(de.keys()) + list(dt.keys())):
+            d, e, t = ds.get(dept, 0), de.get(dept, 0), dt.get(dept, 0)
+            a = (d + e) / 2
+            r = round((t / a * 100), 2) if a > 0 else 0
+            da.append({"一级组织": dept, "期初人数": d, "期末人数": e, "平均人数": round(a, 1), "离职人数": t, "离职率": r})
+        da = sorted(da, key=lambda x: x["离职率"], reverse=True)
+        td = []
+        if len(all_turn) > 0 and "离职类型" in all_turn.columns:
+            t = all_turn.groupby("离职类型").size().reset_index(name="人数")
+            t["占比"] = round(t["人数"] / tt * 100, 2) if tt > 0 else 0
+            td = t.sort_values("人数", ascending=False).to_dict("records")
+        rd = []
+        if len(all_turn) > 0 and "离职原因" in all_turn.columns:
+            r = all_turn.groupby("离职原因").size().reset_index(name="人数")
+            r["占比"] = round(r["人数"] / tt * 100, 2) if tt > 0 else 0
+            rd = r.sort_values("人数", ascending=False).to_dict("records")
+        ted = []
+        if len(all_turn) > 0 and "累计司龄（年）" in all_turn.columns:
             def cat(y):
-                if pd.isna(y): return '未知'
-                elif y <= 0.5: return '0.5年及以下'
-                elif y <= 1: return '0.5-1年'
-                elif y <= 3: return '1-3年'
-                elif y <= 5: return '3-5年'
-                else: return '5年以上'
-            month_turn['司龄段'] = month_turn[tenure_col].apply(cat)
-            t = month_turn.groupby('司龄段').size().reset_index(name='人数')
-            t['占比'] = round(t['人数']/turn_cnt*100, 2) if turn_cnt > 0 else 0
-            t = t.sort_values('人数', ascending=False)
-            tenure_data = t.to_dict('records')
-        
-        # 职级
-        level_data = []
-        if len(month_turn) > 0 and '职级' in month_turn.columns:
-            l = month_turn.groupby('职级').size().reset_index(name='人数')
-            l['占比'] = round(l['人数']/turn_cnt*100, 2) if turn_cnt > 0 else 0
-            l = l.sort_values('人数', ascending=False)
-            level_data = l.to_dict('records')
-        
-        return {
-            'month': month_str,
-            'avg_count': round(avg_cnt, 2),
-            'start_count': start_cnt,
-            'end_count': end_cnt,
-            'turnover_count': turn_cnt,
-            'turnover_rate': turn_rate,
-            'dept_turnover': dept_turnover,
-            'turnover_type': type_data,
-            'turnover_reason': reason_data,
-            'turnover_tenure': tenure_data,
-            'turnover_level': level_data
-        }
+                if pd.isna(y): return "未知"
+                elif y <= 0.5: return "0.5年及以下"
+                elif y <= 1: return "0.5-1年"
+                elif y <= 3: return "1-3年"
+                elif y <= 5: return "3-5年"
+                else: return "5年以上"
+            tmp = all_turn.copy()
+            tmp["司龄段"] = tmp["累计司龄（年）"].apply(cat)
+            t = tmp.groupby("司龄段").size().reset_index(name="人数")
+            t["占比"] = round(t["人数"] / tt * 100, 2) if tt > 0 else 0
+            ted = t.sort_values("人数", ascending=False).to_dict("records")
+        ld = []
+        if len(all_turn) > 0 and "职级" in all_turn.columns:
+            l = all_turn.groupby("职级").size().reset_index(name="人数")
+            l["占比"] = round(l["人数"] / tt * 100, 2) if tt > 0 else 0
+            ld = l.sort_values("人数", ascending=False).to_dict("records")
+        return {"month": lbl, "months": month_nums, "avg_count": round(avg, 1), "start_count": ts, "end_count": te, "turnover_count": tt, "turnover_rate": rate, "dept_turnover": da, "turnover_type": td, "turnover_reason": rd, "turnover_tenure": ted, "turnover_level": ld}
 
-@app.route('/')
+
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/api/upload', methods=['POST'])
+@app.route("/api/upload", methods=["POST"])
 def upload():
     global processor
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'message': '没有文件'})
-    f = request.files['file']
-    if f.filename == '':
-        return jsonify({'success': False, 'message': '文件名为空'})
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(f.filename))
+    if "file" not in request.files:
+        return jsonify({"success": False, "message": "没有文件"})
+    f = request.files["file"]
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], secure_filename(f.filename))
     f.save(filepath)
     try:
         processor = DataProcessor()
         processor.load_file(filepath)
         months = processor.get_available_months()
         if not months:
-            return jsonify({'success': False, 'message': '未找到有效月份数据'})
-        return jsonify({'success': True, 'message': '上传成功', 'summary': processor.get_summary()})
+            return jsonify({"success": False, "message": "未找到有效月份数据"})
+        return jsonify({"success": True, "message": "上传成功", "summary": processor.get_summary()})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        return jsonify({"success": False, "message": str(e)})
 
-@app.route('/api/analyze', methods=['POST'])
+@app.route("/api/analyze", methods=["POST"])
 def analyze():
     global processor
     data = request.json
-    month_str = data.get('month', '')
-    m = re.search(r'(\d+)年(\d+)月', month_str)
-    if not m or not processor:
-        return jsonify({'success': False, 'message': '参数错误'})
-    month_num = int(m.group(2))
-    result = processor.get_monthly_analysis(month_num)
+    month_value = data.get("month", "")
+    if not month_value or not processor:
+        return jsonify({"success": False, "message": "参数错误"})
+    rm = re.search(r"(\d+)年(\d+)月至(\d+)年(\d+)月", month_value)
+    if rm:
+        sm, em = int(rm.group(2)), int(rm.group(4))
+        mns = list(range(sm, em + 1))
+    else:
+        m = re.search(r"(\d+)年(\d+)月", month_value)
+        mns = [int(m.group(2))] if m else []
+    result = processor.get_monthly_analysis(mns)
     if not result:
-        return jsonify({'success': False, 'message': '未找到数据'})
-    return jsonify({'success': True, 'data': result})
+        return jsonify({"success": False, "message": "未找到数据"})
+    return jsonify({"success": True, "data": result})
 
-@app.route('/api/export', methods=['POST'])
+@app.route("/api/export", methods=["POST"])
 def export():
     global processor
     data = request.json
-    month_str = data.get('month', '')
-    m = re.search(r'(\d+)年(\d+)月', month_str)
-    if not m or not processor:
-        return jsonify({'success': False, 'message': '参数错误'})
-    month_num = int(m.group(2))
-    result = processor.get_monthly_analysis(month_num)
+    month_value = data.get("month", "")
+    if not month_value or not processor:
+        return jsonify({"success": False, "message": "参数错误"})
+    rm = re.search(r"(\d+)年(\d+)月至(\d+)年(\d+)月", month_value)
+    if rm:
+        sm, em = int(rm.group(2)), int(rm.group(4))
+        mns = list(range(sm, em + 1))
+    else:
+        m = re.search(r"(\d+)年(\d+)月", month_value)
+        mns = [int(m.group(2))] if m else []
+    result = processor.get_monthly_analysis(mns)
     if not result:
-        return jsonify({'success': False, 'message': '未找到数据'})
+        return jsonify({"success": False, "message": "未找到数据"})
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as w:
-        pd.DataFrame([{
-            '月份': result['month'],
-            '期初人数': result['start_count'],
-            '期末人数': result['end_count'],
-            '平均人数': result['avg_count'],
-            '离职人数': result['turnover_count'],
-            '离职率(%)': result['turnover_rate']
-        }]).to_excel(w, sheet_name='概览', index=False)
-        if result['dept_turnover']:
-            pd.DataFrame(result['dept_turnover']).to_excel(w, sheet_name='部门离职', index=False)
-        if result['turnover_type']:
-            pd.DataFrame(result['turnover_type']).to_excel(w, sheet_name='离职类型', index=False)
-        if result['turnover_reason']:
-            pd.DataFrame(result['turnover_reason']).to_excel(w, sheet_name='离职原因', index=False)
-        if result['turnover_tenure']:
-            pd.DataFrame(result['turnover_tenure']).to_excel(w, sheet_name='司龄分布', index=False)
-        if result['turnover_level']:
-            pd.DataFrame(result['turnover_level']).to_excel(w, sheet_name='职级分布', index=False)
+    with pd.ExcelWriter(output, engine="openpyxl") as w:
+        pd.DataFrame([{"月份": result["month"], "期初人数": result["start_count"], "期末人数": result["end_count"], "平均人数": result["avg_count"], "离职人数": result["turnover_count"], "离职率": str(result["turnover_rate"]) + "%"}]).to_excel(w, sheet_name="概览", index=False)
+        if result["dept_turnover"]: pd.DataFrame(result["dept_turnover"]).to_excel(w, sheet_name="部门离职", index=False)
+        if result["turnover_type"]: pd.DataFrame(result["turnover_type"]).to_excel(w, sheet_name="离职类型", index=False)
+        if result["turnover_reason"]: pd.DataFrame(result["turnover_reason"]).to_excel(w, sheet_name="离职原因", index=False)
+        if result["turnover_tenure"]: pd.DataFrame(result["turnover_tenure"]).to_excel(w, sheet_name="司龄分布", index=False)
+        if result["turnover_level"]: pd.DataFrame(result["turnover_level"]).to_excel(w, sheet_name="职级分布", index=False)
     output.seek(0)
-    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                     as_attachment=True, download_name=result['month']+'离职分析.xlsx')
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=result["month"] + "离职分析.xlsx")
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
