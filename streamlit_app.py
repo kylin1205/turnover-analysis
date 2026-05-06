@@ -25,15 +25,33 @@ class Proc:
     def __init__(self, xlsx):
         self.period = {}
         self.turn = None
+        self.turn_months = []  # Store months for turnover data
+        
         for sh in xlsx.sheet_names:
             try:
                 df = pd.read_excel(xlsx, sheet_name=sh)
                 # Check if this is a turnover sheet (contains 离职 but not 期初/期末)
                 if "离职" in sh and "期初" not in sh and "期末" not in sh:
                     self.turn = df.copy()
-                    if "最后工作日" in df.columns:
-                        self.turn["最后工作日"] = pd.to_datetime(self.turn["最后工作日"], errors="coerce")
-                        self.turn["离职月份"] = self.turn["最后工作日"].dt.strftime("%Y年%m月")
+                    # Extract month from sheet name (e.g., "4月离职人员" -> 4)
+                    m = re.search(r"^(\d{1,2})月", sh)
+                    if m:
+                        self.turn_months.append(int(m.group(1)))
+                    # If no "最后工作日" column, add a dummy month column based on sheet name
+                    if "最后工作日" not in df.columns and "离职日期" not in df.columns:
+                        if m:
+                            self.turn["离职月份"] = get_month_str(int(m.group(1)))
+                        else:
+                            # Try other date columns
+                            for col in df.columns:
+                                if "日期" in col or "日期" in col:
+                                    df[col] = pd.to_datetime(df[col], errors="coerce")
+                                    self.turn["离职月份"] = df[col].dt.strftime("%Y年%m月")
+                                    break
+                    else:
+                        date_col = "最后工作日" if "最后工作日" in df.columns else "离职日期"
+                        self.turn[date_col] = pd.to_datetime(self.turn[date_col], errors="coerce")
+                        self.turn["离职月份"] = self.turn[date_col].dt.strftime("%Y年%m月")
                     continue
                 m = re.search(r"^(\d{1,2})月", sh)
                 if not m: continue
@@ -49,7 +67,8 @@ class Proc:
                 if "期初" in sh:
                     if om not in self.period: self.period[om] = {"s": None, "e": None}
                     self.period[om]["s"] = df
-            except: pass
+            except Exception as e:
+                print(f"Error processing sheet {sh}: {e}")
     
     def months(self):
         return sorted([m for m in self.period.keys() if self.period[m]["s"] is not None])
@@ -121,55 +140,58 @@ if f:
     p = Proc(xlsx)
     ms = p.months()
     
-    options = []
-    for m in ms: options.append((get_month_str(m), [m]))
-    for i in range(len(ms)):
-        for j in range(i + 1, len(ms)):
-            if ms[j] - ms[i] == j - i:
-                options.append((get_month_str(ms[i]) + "至" + get_month_str(ms[j]), list(range(ms[i], ms[j] + 1))))
-    
-    sel = st.selectbox("选择月份", [o[0] for o in options])
-    sel_mns = dict(options).get(sel, [1])
-    
-    if st.button("分析", type="primary"):
-        r = p.analyze(sel_mns)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("月份", r["month"])
-        c2.metric("平均人数", r["avg"])
-        c3.metric("离职人数", r["turn"])
-        c4.metric("离职率", str(r["rate"]) + "%")
+    if not ms:
+        st.error("未找到期初数据，请检查文件格式！")
+    else:
+        options = []
+        for m in ms: options.append((get_month_str(m), [m]))
+        for i in range(len(ms)):
+            for j in range(i + 1, len(ms)):
+                if ms[j] - ms[i] == j - i:
+                    options.append((get_month_str(ms[i]) + "至" + get_month_str(ms[j]), list(range(ms[i], ms[j] + 1))))
         
-        if r["dept"]:
-            st.subheader("各部门离职分析")
-            st.dataframe(pd.DataFrame(r["dept"]), use_container_width=True, hide_index=True)
+        sel = st.selectbox("选择月份", [o[0] for o in options])
+        sel_mns = dict(options).get(sel, [1])
         
-        if r["type"]:
-            st.subheader("离职类型分布")
-            st.dataframe(pd.DataFrame(r["type"]), use_container_width=True, hide_index=True)
-        
-        if r["reason"]:
-            st.subheader("离职原因分布")
-            st.dataframe(pd.DataFrame(r["reason"]), use_container_width=True, hide_index=True)
-        
-        if r["tenure"]:
-            st.subheader("离职司龄分布")
-            st.dataframe(pd.DataFrame(r["tenure"]), use_container_width=True, hide_index=True)
-        
-        if r["level"]:
-            st.subheader("职级分布")
-            st.dataframe(pd.DataFrame(r["level"]), use_container_width=True, hide_index=True)
-        
-        # Export
-        st.subheader("导出数据")
-        out = BytesIO()
-        with pd.ExcelWriter(out, engine="openpyxl") as w:
-            pd.DataFrame([{"月份": r["month"], "期初人数": r["start"], "期末人数": r["end"], "平均人数": r["avg"], "离职人数": r["turn"], "离职率": str(r["rate"]) + "%"}]).to_excel(w, sheet_name="概览", index=False)
-            if r["dept"]: pd.DataFrame(r["dept"]).to_excel(w, sheet_name="部门离职", index=False)
-            if r["type"]: pd.DataFrame(r["type"]).to_excel(w, sheet_name="离职类型", index=False)
-            if r["reason"]: pd.DataFrame(r["reason"]).to_excel(w, sheet_name="离职原因", index=False)
-            if r["tenure"]: pd.DataFrame(r["tenure"]).to_excel(w, sheet_name="司龄分布", index=False)
-            if r["level"]: pd.DataFrame(r["level"]).to_excel(w, sheet_name="职级分布", index=False)
-        
-        st.download_button(label="下载Excel报告", data=out.getvalue(), file_name=r["month"] + "离职分析.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        if st.button("分析", type="primary"):
+            r = p.analyze(sel_mns)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("月份", r["month"])
+            c2.metric("平均人数", r["avg"])
+            c3.metric("离职人数", r["turn"])
+            c4.metric("离职率", str(r["rate"]) + "%")
+            
+            if r["dept"]:
+                st.subheader("各部门离职分析")
+                st.dataframe(pd.DataFrame(r["dept"]), use_container_width=True, hide_index=True)
+            
+            if r["type"]:
+                st.subheader("离职类型分布")
+                st.dataframe(pd.DataFrame(r["type"]), use_container_width=True, hide_index=True)
+            
+            if r["reason"]:
+                st.subheader("离职原因分布")
+                st.dataframe(pd.DataFrame(r["reason"]), use_container_width=True, hide_index=True)
+            
+            if r["tenure"]:
+                st.subheader("离职司龄分布")
+                st.dataframe(pd.DataFrame(r["tenure"]), use_container_width=True, hide_index=True)
+            
+            if r["level"]:
+                st.subheader("职级分布")
+                st.dataframe(pd.DataFrame(r["level"]), use_container_width=True, hide_index=True)
+            
+            # Export
+            st.subheader("导出数据")
+            out = BytesIO()
+            with pd.ExcelWriter(out, engine="openpyxl") as w:
+                pd.DataFrame([{"月份": r["month"], "期初人数": r["start"], "期末人数": r["end"], "平均人数": r["avg"], "离职人数": r["turn"], "离职率": str(r["rate"]) + "%"}]).to_excel(w, sheet_name="概览", index=False)
+                if r["dept"]: pd.DataFrame(r["dept"]).to_excel(w, sheet_name="部门离职", index=False)
+                if r["type"]: pd.DataFrame(r["type"]).to_excel(w, sheet_name="离职类型", index=False)
+                if r["reason"]: pd.DataFrame(r["reason"]).to_excel(w, sheet_name="离职原因", index=False)
+                if r["tenure"]: pd.DataFrame(r["tenure"]).to_excel(w, sheet_name="司龄分布", index=False)
+                if r["level"]: pd.DataFrame(r["level"]).to_excel(w, sheet_name="职级分布", index=False)
+            
+            st.download_button(label="下载Excel报告", data=out.getvalue(), file_name=r["month"] + "离职分析.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
     st.info("请上传Excel文件开始分析")
