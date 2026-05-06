@@ -28,10 +28,11 @@ class Proc:
         for sh in xlsx.sheet_names:
             try:
                 df = pd.read_excel(xlsx, sheet_name=sh)
-                if sh == "离职数据":
+                # Check if this is a turnover sheet (contains 离职 but not 期初/期末)
+                if "离职" in sh and "期初" not in sh and "期末" not in sh:
                     self.turn = df.copy()
                     if "最后工作日" in df.columns:
-                        self.turn["最后工作日"] = pd.to_datetime(df["最后工作日"], errors="coerce")
+                        self.turn["最后工作日"] = pd.to_datetime(self.turn["最后工作日"], errors="coerce")
                         self.turn["离职月份"] = self.turn["最后工作日"].dt.strftime("%Y年%m月")
                     continue
                 m = re.search(r"^(\d{1,2})月", sh)
@@ -144,8 +145,6 @@ if f:
         
         if r["type"]:
             st.subheader("离职类型分布")
-        if r["type"]:
-            st.subheader("离职类型分布")
             st.dataframe(pd.DataFrame(r["type"]), use_container_width=True, hide_index=True)
         
         if r["reason"]:
@@ -172,3 +171,5 @@ if f:
             if r["level"]: pd.DataFrame(r["level"]).to_excel(w, sheet_name="职级分布", index=False)
         
         st.download_button(label="下载Excel报告", data=out.getvalue(), file_name=r["month"] + "离职分析.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+else:
+    st.info("请上传Excel文件开始分析")
