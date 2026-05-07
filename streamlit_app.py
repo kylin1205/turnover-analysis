@@ -1,5 +1,5 @@
 """
-员工离职数据分析系统 - Streamlit Cloud版本 V3.0
+员工离职数据分析系统 - Streamlit Cloud版本 V3.1
 """
 import streamlit as st
 import pandas as pd
@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import re
 from io import BytesIO
+import base64
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -34,6 +35,12 @@ def cat_level(level):
     elif level.startswith("资深"): return "资深"
     elif level.startswith("总监"): return "总监"
     else: return level
+
+def download_fig(fig, filename):
+    img_bytes = fig.to_image(format="png", width=1200, height=600, scale=2)
+    b64 = base64.b64encode(img_bytes).decode()
+    href = '<a href="data:image/png;base64,' + b64 + '" download="' + filename + '" style="display:inline-block;padding:8px 16px;background:#4F46E5;color:white;text-decoration:none;border-radius:6px;font-size:14px;">下载图表</a>'
+    return href
 
 class Proc:
     def __init__(self, xlsx):
@@ -129,7 +136,7 @@ class Proc:
             ld = l.sort_values("人数", ascending=False).to_dict("records")
         return {"month": lbl, "avg": round(avg, 1), "start": ts, "end": te, "turn": tt, "rate": rate, "dept": da, "type": td, "reason": rd, "tenure": ted, "level": ld}
 
-st.markdown('<div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;"><h2 style="color: white; margin: 0;">员工离职数据分析系统 V3.0</h2></div>', unsafe_allow_html=True)
+st.markdown('<div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;"><h2 style="color: white; margin: 0;">员工离职数据分析系统 V3.1</h2></div>', unsafe_allow_html=True)
 
 st.header("数据导入")
 f = st.file_uploader("上传Excel文件", type=["xlsx", "xls"])
@@ -163,26 +170,21 @@ if f:
             c3.metric("离职人数", str(r["turn"]) + "人")
             c4.metric("离职率", str(r["rate"]) + "%")
             
-            st.divider()
+            st.markdown("---")
             
             if r["dept"]:
                 st.subheader("各部门离职分析")
                 df_dept = pd.DataFrame(r["dept"])
                 
                 fig = go.Figure()
-                fig.add_trace(go.Bar(x=df_dept["一级组织"], y=df_dept["离职人数"], name="离职人数",
-                    marker_color=COLORS["primary"], text=df_dept["离职人数"], textposition="outside"))
-                fig.add_trace(go.Scatter(x=df_dept["一级组织"], y=df_dept["离职率"], name="离职率(%)",
-                    marker_color=COLORS["danger"], text=[f"{x:.2f}%" for x in df_dept["离职率"]],
-                    textposition="top center", yaxis="y2", mode="lines+markers+text"))
-                fig.update_layout(xaxis=dict(title="部门", tickangle=-45),
-                    yaxis=dict(title="离职人数", title_font=dict(color=COLORS["primary"])),
-                    yaxis2=dict(title="离职率(%)", title_font=dict(color=COLORS["danger"]), overlaying="y", side="right"),
-                    legend=dict(x=0.5, y=1.1, xanchor="center", orientation="h"), height=400, margin=dict(b=100))
+                fig.add_trace(go.Bar(x=df_dept["一级组织"], y=df_dept["离职人数"], name="离职人数", marker_color=COLORS["primary"], text=df_dept["离职人数"], textposition="outside"))
+                fig.add_trace(go.Scatter(x=df_dept["一级组织"], y=df_dept["离职率"], name="离职率(%)", marker_color=COLORS["danger"], text=[f"{x:.2f}%" for x in df_dept["离职率"]], textposition="top center", yaxis="y2", mode="lines+markers+text", line=dict(width=3), marker=dict(size=10)))
+                fig.update_layout(title=dict(text="各部门离职人数与离职率", font=dict(size=20)), xaxis=dict(title="部门", tickangle=-45, tickfont=dict(size=11), gridcolor="lightgray"), yaxis=dict(title="离职人数", title_font=dict(color=COLORS["primary"], size=14), tickfont=dict(size=12), gridcolor="lightgray"), yaxis2=dict(title="离职率(%)", title_font=dict(color=COLORS["danger"], size=14), overlaying="y", side="right", tickfont=dict(size=12)), legend=dict(x=0.5, y=1.12, xanchor="center", orientation="h", font=dict(size=13)), height=550, margin=dict(b=120), plot_bgcolor="white", paper_bgcolor="white")
                 st.plotly_chart(fig, use_container_width=True)
+                st.markdown(download_fig(fig, r["month"] + "_部门离职分析.png"), unsafe_allow_html=True)
                 st.dataframe(df_dept, use_container_width=True, hide_index=True)
             
-            st.divider()
+            st.markdown("---")
             
             if r["type"]:
                 st.subheader("离职类型分布")
@@ -195,49 +197,55 @@ if f:
                 merged = df_type.groupby("离职类型")["人数"].sum().reset_index()
                 merged["占比"] = round(merged["人数"] / r["turn"] * 100, 2)
                 
-                fig_pie = px.pie(merged, values="人数", names="离职类型", title="离职类型占比", hole=0.4,
-                    color_discrete_sequence=[COLORS["success"], COLORS["danger"]])
-                fig_pie.update_layout(height=400)
+                fig_pie = px.pie(merged, values="人数", names="离职类型", title="离职类型占比", color_discrete_sequence=[COLORS["success"], COLORS["danger"]], hole=0.5)
+                fig_pie.update_traces(textposition="outside", textinfo="label+percent", textfont=dict(size=16), marker=dict(line=dict(color="white", width=3)))
+                fig_pie.update_layout(title=dict(text="离职类型占比", font=dict(size=20)), height=500, legend=dict(font=dict(size=14)), annotations=[dict(text="离职类型", x=0.5, y=0.5, font_size=16, showarrow=False)])
                 st.plotly_chart(fig_pie, use_container_width=True)
+                st.markdown(download_fig(fig_pie, r["month"] + "_离职类型分布.png"), unsafe_allow_html=True)
                 st.dataframe(df_type, use_container_width=True, hide_index=True)
             
-            st.divider()
+            st.markdown("---")
             
             if r["tenure"]:
                 st.subheader("离职司龄分布")
                 df_tenure = pd.DataFrame(r["tenure"])
-                fig_tenure = px.pie(df_tenure, values="人数", names="司龄段", title="司龄分布", hole=0.4)
-                fig_tenure.update_layout(height=400)
+                
+                fig_tenure = px.pie(df_tenure, values="人数", names="司龄段", title="司龄分布", color_discrete_sequence=px.colors.qualitative.Set3, hole=0.5)
+                fig_tenure.update_traces(textposition="outside", textinfo="label+percent", textfont=dict(size=14), marker=dict(line=dict(color="white", width=3)))
+                fig_tenure.update_layout(title=dict(text="离职司龄分布", font=dict(size=20)), height=500, legend=dict(font=dict(size=14)), annotations=[dict(text="司龄", x=0.5, y=0.5, font_size=16, showarrow=False)])
                 st.plotly_chart(fig_tenure, use_container_width=True)
+                st.markdown(download_fig(fig_tenure, r["month"] + "_司龄分布.png"), unsafe_allow_html=True)
                 st.dataframe(df_tenure, use_container_width=True, hide_index=True)
             
-            st.divider()
+            st.markdown("---")
             
             if r["reason"]:
                 st.subheader("离职原因分布")
                 df_reason = pd.DataFrame(r["reason"])
+                
                 fig_reason = go.Figure()
-                fig_reason.add_trace(go.Bar(x=df_reason["人数"], y=df_reason["离职原因"], orientation="h",
-                    marker_color=COLORS["warning"], text=[f"{d}人({p}%)" for d, p in zip(df_reason["人数"], df_reason["占比"])], textposition="outside"))
-                fig_reason.update_layout(title="离职原因分布", xaxis_title="人数", yaxis_title="离职原因",
-                    height=max(300, len(df_reason) * 40), margin=dict(l=200))
+                fig_reason.add_trace(go.Bar(x=df_reason["离职原因"], y=df_reason["人数"], marker_color=COLORS["warning"], text=[f"{d}人({p}%)" for d, p in zip(df_reason["人数"], df_reason["占比"])], textposition="outside", width=0.7))
+                fig_reason.update_layout(title=dict(text="离职原因分布（纵向）", font=dict(size=20)), xaxis=dict(title="离职原因", tickangle=-30, tickfont=dict(size=11), gridcolor="lightgray"), yaxis=dict(title="人数", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="lightgray"), height=max(450, len(df_reason) * 60), margin=dict(b=120, l=80), plot_bgcolor="white", paper_bgcolor="white")
                 st.plotly_chart(fig_reason, use_container_width=True)
+                st.markdown(download_fig(fig_reason, r["month"] + "_离职原因分布.png"), unsafe_allow_html=True)
                 st.dataframe(df_reason, use_container_width=True, hide_index=True)
             
-            st.divider()
+            st.markdown("---")
             
             if r["level"]:
                 st.subheader("职级分布（合并后）")
                 df_level = pd.DataFrame(r["level"])
+                
                 fig_level = go.Figure()
-                fig_level.add_trace(go.Bar(x=df_level["职级合并"], y=df_level["人数"],
-                    marker_color=COLORS["purple"], text=[f"{d}人({p}%)" for d, p in zip(df_level["人数"], df_level["占比"])], textposition="outside"))
-                fig_level.update_layout(title="职级分布", xaxis_title="职级", yaxis_title="人数", height=400)
+                fig_level.add_trace(go.Bar(x=df_level["职级合并"], y=df_level["人数"], marker_color=COLORS["purple"], text=[f"{d}人({p}%)" for d, p in zip(df_level["人数"], df_level["占比"])], textposition="outside", width=0.7))
+                fig_level.update_layout(title=dict(text="职级分布（人数+占比）", font=dict(size=20)), xaxis=dict(title="职级", tickfont=dict(size=14), gridcolor="lightgray"), yaxis=dict(title="人数", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="lightgray"), height=450, plot_bgcolor="white", paper_bgcolor="white")
                 st.plotly_chart(fig_level, use_container_width=True)
+                st.markdown(download_fig(fig_level, r["month"] + "_职级分布.png"), unsafe_allow_html=True)
                 st.dataframe(df_level.rename(columns={"职级合并": "职级"}), use_container_width=True, hide_index=True)
             
-            st.divider()
+            st.markdown("---")
             
+            # 导出Excel
             st.subheader("导出数据")
             out = BytesIO()
             with pd.ExcelWriter(out, engine="openpyxl") as w:
@@ -248,7 +256,11 @@ if f:
                 if r["tenure"]: pd.DataFrame(r["tenure"]).to_excel(w, sheet_name="司龄分布", index=False)
                 if r["level"]: pd.DataFrame(r["level"]).to_excel(w, sheet_name="职级分布", index=False)
             
-            st.download_button(label="下载Excel报告", data=out.getvalue(), file_name=r["month"] + "离职分析.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button(
+                label="下载Excel报告",
+                data=out.getvalue(),
+                file_name=r["month"] + "离职分析.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 else:
     st.info("请上传Excel文件开始分析")
