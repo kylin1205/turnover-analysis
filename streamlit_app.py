@@ -7,9 +7,23 @@ import plotly.express as px
 import plotly.graph_objects as go
 import re
 from io import BytesIO
-import base64
+import json
+
 import warnings
 warnings.filterwarnings("ignore")
+
+def get_download_config(name):
+    return {
+        "toImageButtonOptions": {
+            "format": "png",
+            "filename": name,
+            "height": 600,
+            "width": 1200,
+            "scale": 2
+        },
+        "displaylogo": False,
+        "modeBarButtonsToRemove": ["select2d", "lasso2d"]
+    }
 
 st.set_page_config(page_title="员工离职数据分析", layout="wide")
 
@@ -35,12 +49,6 @@ def cat_level(level):
     elif level.startswith("资深"): return "资深"
     elif level.startswith("总监"): return "总监"
     else: return level
-
-def download_fig(fig, filename):
-    img_bytes = fig.to_image(format="png", width=1200, height=600, scale=2)
-    b64 = base64.b64encode(img_bytes).decode()
-    href = '<a href="data:image/png;base64,' + b64 + '" download="' + filename + '" style="display:inline-block;padding:8px 16px;background:#4F46E5;color:white;text-decoration:none;border-radius:6px;font-size:14px;">下载图表</a>'
-    return href
 
 class Proc:
     def __init__(self, xlsx):
@@ -180,8 +188,7 @@ if f:
                 fig.add_trace(go.Bar(x=df_dept["一级组织"], y=df_dept["离职人数"], name="离职人数", marker_color=COLORS["primary"], text=df_dept["离职人数"], textposition="outside"))
                 fig.add_trace(go.Scatter(x=df_dept["一级组织"], y=df_dept["离职率"], name="离职率(%)", marker_color=COLORS["danger"], text=[f"{x:.2f}%" for x in df_dept["离职率"]], textposition="top center", yaxis="y2", mode="lines+markers+text", line=dict(width=3), marker=dict(size=10)))
                 fig.update_layout(title=dict(text="各部门离职人数与离职率", font=dict(size=20)), xaxis=dict(title="部门", tickangle=-45, tickfont=dict(size=11), gridcolor="lightgray"), yaxis=dict(title="离职人数", title_font=dict(color=COLORS["primary"], size=14), tickfont=dict(size=12), gridcolor="lightgray"), yaxis2=dict(title="离职率(%)", title_font=dict(color=COLORS["danger"], size=14), overlaying="y", side="right", tickfont=dict(size=12)), legend=dict(x=0.5, y=1.12, xanchor="center", orientation="h", font=dict(size=13)), height=550, margin=dict(b=120), plot_bgcolor="white", paper_bgcolor="white")
-                st.plotly_chart(fig, use_container_width=True)
-                st.markdown(download_fig(fig, r["month"] + "_部门离职分析.png"), unsafe_allow_html=True)
+                st.plotly_chart(fig, use_container_width=True, config=get_download_config(r["month"] + "_部门离职分析"))
                 st.dataframe(df_dept, use_container_width=True, hide_index=True)
             
             st.markdown("---")
@@ -200,8 +207,7 @@ if f:
                 fig_pie = px.pie(merged, values="人数", names="离职类型", title="离职类型占比", color_discrete_sequence=[COLORS["success"], COLORS["danger"]], hole=0.5)
                 fig_pie.update_traces(textposition="outside", textinfo="label+percent", textfont=dict(size=16), marker=dict(line=dict(color="white", width=3)))
                 fig_pie.update_layout(title=dict(text="离职类型占比", font=dict(size=20)), height=500, legend=dict(font=dict(size=14)), annotations=[dict(text="离职类型", x=0.5, y=0.5, font_size=16, showarrow=False)])
-                st.plotly_chart(fig_pie, use_container_width=True)
-                st.markdown(download_fig(fig_pie, r["month"] + "_离职类型分布.png"), unsafe_allow_html=True)
+                st.plotly_chart(fig_pie, use_container_width=True, config=get_download_config(r["month"] + "_离职类型分布"))
                 st.dataframe(df_type, use_container_width=True, hide_index=True)
             
             st.markdown("---")
@@ -213,8 +219,7 @@ if f:
                 fig_tenure = px.pie(df_tenure, values="人数", names="司龄段", title="司龄分布", color_discrete_sequence=px.colors.qualitative.Set3, hole=0.5)
                 fig_tenure.update_traces(textposition="outside", textinfo="label+percent", textfont=dict(size=14), marker=dict(line=dict(color="white", width=3)))
                 fig_tenure.update_layout(title=dict(text="离职司龄分布", font=dict(size=20)), height=500, legend=dict(font=dict(size=14)), annotations=[dict(text="司龄", x=0.5, y=0.5, font_size=16, showarrow=False)])
-                st.plotly_chart(fig_tenure, use_container_width=True)
-                st.markdown(download_fig(fig_tenure, r["month"] + "_司龄分布.png"), unsafe_allow_html=True)
+                st.plotly_chart(fig_tenure, use_container_width=True, config=get_download_config(r["month"] + "_司龄分布"))
                 st.dataframe(df_tenure, use_container_width=True, hide_index=True)
             
             st.markdown("---")
@@ -226,8 +231,7 @@ if f:
                 fig_reason = go.Figure()
                 fig_reason.add_trace(go.Bar(x=df_reason["离职原因"], y=df_reason["人数"], marker_color=COLORS["warning"], text=[f"{d}人({p}%)" for d, p in zip(df_reason["人数"], df_reason["占比"])], textposition="outside", width=0.7))
                 fig_reason.update_layout(title=dict(text="离职原因分布（纵向）", font=dict(size=20)), xaxis=dict(title="离职原因", tickangle=-30, tickfont=dict(size=11), gridcolor="lightgray"), yaxis=dict(title="人数", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="lightgray"), height=max(450, len(df_reason) * 60), margin=dict(b=120, l=80), plot_bgcolor="white", paper_bgcolor="white")
-                st.plotly_chart(fig_reason, use_container_width=True)
-                st.markdown(download_fig(fig_reason, r["month"] + "_离职原因分布.png"), unsafe_allow_html=True)
+                st.plotly_chart(fig_reason, use_container_width=True, config=get_download_config(r["month"] + "_离职原因分布"))
                 st.dataframe(df_reason, use_container_width=True, hide_index=True)
             
             st.markdown("---")
@@ -239,8 +243,7 @@ if f:
                 fig_level = go.Figure()
                 fig_level.add_trace(go.Bar(x=df_level["职级合并"], y=df_level["人数"], marker_color=COLORS["purple"], text=[f"{d}人({p}%)" for d, p in zip(df_level["人数"], df_level["占比"])], textposition="outside", width=0.7))
                 fig_level.update_layout(title=dict(text="职级分布（人数+占比）", font=dict(size=20)), xaxis=dict(title="职级", tickfont=dict(size=14), gridcolor="lightgray"), yaxis=dict(title="人数", title_font=dict(size=14), tickfont=dict(size=12), gridcolor="lightgray"), height=450, plot_bgcolor="white", paper_bgcolor="white")
-                st.plotly_chart(fig_level, use_container_width=True)
-                st.markdown(download_fig(fig_level, r["month"] + "_职级分布.png"), unsafe_allow_html=True)
+                st.plotly_chart(fig_level, use_container_width=True, config=get_download_config(r["month"] + "_职级分布"))
                 st.dataframe(df_level.rename(columns={"职级合并": "职级"}), use_container_width=True, hide_index=True)
             
             st.markdown("---")
