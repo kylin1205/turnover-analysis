@@ -10,6 +10,7 @@ from io import BytesIO
 import json
 import requests
 import os
+from datetime import datetime
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -84,6 +85,159 @@ def call_deepseek(prompt, system_prompt=None):
             return f"API调用失败: {response.status_code} - {response.text}"
     except Exception as e:
         return f"API调用错误: {str(e)}"
+
+def export_to_pdf(analysis_text, month):
+    """将分析报告导出为 PDF"""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Title_CN', fontName='Helvetica', fontSize=18, alignment=1, spaceAfter=20))
+    styles.add(ParagraphStyle(name='Heading1_CN', fontName='Helvetica-Bold', fontSize=14, spaceBefore=15, spaceAfter=8))
+    styles.add(ParagraphStyle(name='Body_CN', fontName='Helvetica', fontSize=10, leading=14, spaceAfter=6))
+    
+    story = []
+    story.append(Paragraph(f"员工离职分析报告", styles['Title_CN']))
+    story.append(Paragraph(f"{month} | 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Body_CN']))
+    story.append(Spacer(1, 0.5*cm))
+    
+    lines = analysis_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            story.append(Spacer(1, 0.2*cm))
+            continue
+        if line.startswith('## '):
+            story.append(Paragraph(line.replace('## ', ''), styles['Heading1_CN']))
+        elif line.startswith('# '):
+            story.append(Paragraph(line, styles['Title_CN']))
+        elif line.startswith('**') and line.endswith('**'):
+            story.append(Paragraph(line, styles['Heading1_CN']))
+        elif line.startswith('- ') or line.startswith('* '):
+            story.append(Paragraph(line, styles['Body_CN']))
+        elif line.startswith('>'):
+            story.append(Paragraph(line.replace('>', '').strip(), styles['Body_CN']))
+        elif line.startswith('|'):
+            continue
+        else:
+            story.append(Paragraph(line, styles['Body_CN']))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def export_to_word(analysis_text, month, data_summary=None):
+    """将分析报告导出为 Word"""
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.oxml.ns import qn
+    
+    doc = Document()
+    
+    style = doc.styles['Normal']
+    style.font.name = 'Microsoft YaHei'
+    style._element.rPr.rFonts.set(qn('w:eastAsia'), 'Microsoft YaHei')
+    style.font.size = Pt(11)
+    
+    title = doc.add_heading('员工离职分析报告', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    subtitle = doc.add_paragraph()
+    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = subtitle.add_run(f"{month} | 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(128, 128, 128)
+    
+    doc.add_paragraph()
+    
+    lines = analysis_text.split('\n')
+    in_table = False
+    table_rows = []
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if in_table and table_rows:
+                in_table = False
+            continue
+        
+        if line.startswith('|') and line.endswith('|'):
+            if '---' not in line:
+                in_table = True
+                cells = [c.strip() for c in line.split('|')[1:-1]]
+                table_rows.append(cells)
+            continue
+        else:
+            if in_table and table_rows:
+                if table_rows:
+                    tbl = doc.add_table(rows=len(table_rows), cols=len(table_rows[0]))
+                    tbl.style = 'Table Grid'
+                    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+                    for i, row in enumerate(table_rows):
+                        for j, cell_text in enumerate(row):
+                            cell = tbl.rows[i].cells[j]
+                            cell.text = cell_text
+                            for para in cell.paragraphs:
+                                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doc.add_paragraph()
+                table_rows = []
+                in_table = False
+        
+        if line.startswith('## '):
+            doc.add_heading(line.replace('## ', ''), level=2)
+        elif line.startswith('# '):
+            doc.add_heading(line.replace('# ', ''), level=1)
+        elif line.startswith('**') and line.endswith('**'):
+            p = doc.add_paragraph()
+            run = p.add_run(line.replace('**', ''))
+            run.bold = True
+        elif line.startswith('- ') or line.startswith('* '):
+            doc.add_paragraph(line, style='List Bullet')
+        elif line.startswith('>'):
+            doc.add_paragraph(line.replace('>', '').strip())
+        elif in_table:
+            pass
+        else:
+            doc.add_paragraph(line)
+    
+    if data_summary:
+        doc.add_page_break()
+        doc.add_heading('原始数据摘要', level=1)
+        p = doc.add_paragraph()
+        run = p.add_run(data_summary)
+        run.font.size = Pt(10)
+    
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def get_data_summary(r):
+    """获取数据摘要文本"""
+    lines = []
+    lines.append(f"分析周期: {r['month']}")
+    lines.append(f"离职率: {r['rate']}%")
+    lines.append(f"离职总人数: {r['turn']} 人")
+    lines.append(f"平均人数: {r['avg']} 人")
+    if r["type"]:
+        for t in r["type"]:
+            lines.append(f"{t.get('离职类型', '类型')}: {t.get('人数', 0)} 人")
+    if r["dept"]:
+        lines.append("\n各部门离职数据:")
+        for d in r["dept"][:10]:
+            lines.append(f"- {d['一级组织']}: 离职{d['离职人数']}人, 离职率{d['离职率']}%")
+    if r["reason"]:
+        lines.append("\n离职原因分布:")
+        for reason in r["reason"][:8]:
+            lines.append(f"- {reason['离职原因']}: {reason['人数']}人, 占比{reason['占比']}%")
+    return '\n'.join(lines)
 
 def generate_ai_analysis(r):
     """使用 DeepSeek AI 生成智能分析报告"""
@@ -358,6 +512,47 @@ if f:
             with st.spinner("正在生成分析报告..."):
                 analysis = generate_ai_analysis(r)
             st.markdown(analysis)
+            
+            # 导出选项
+            col1, col2, col3 = st.columns(3)
+            data_summary = get_data_summary(r)
+            
+            with col1:
+                # PDF 导出
+                try:
+                    pdf_bytes = export_to_pdf(analysis, r["month"])
+                    st.download_button(
+                        label="📄 下载 PDF 报告",
+                        data=pdf_bytes,
+                        file_name=r["month"] + "离职分析报告.pdf",
+                        mime="application/pdf"
+                    )
+                except Exception as e:
+                    st.error(f"PDF导出失败: {str(e)}")
+            
+            with col2:
+                # Word 导出
+                try:
+                    word_bytes = export_to_word(analysis, r["month"], data_summary)
+                    st.download_button(
+                        label="📝 下载 Word 报告",
+                        data=word_bytes,
+                        file_name=r["month"] + "离职分析报告.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+                except Exception as e:
+                    st.error(f"Word导出失败: {str(e)}")
+            
+            with col3:
+                # Markdown 导出
+                md_content = f"# 员工离职分析报告\n\n{r['month']}\n\n{analysis}\n\n---\n\n## 原始数据\n\n{data_summary}"
+                st.download_button(
+                    label="📋 下载 Markdown",
+                    data=md_content,
+                    file_name=r["month"] + "离职分析报告.md",
+                    mime="text/markdown"
+                )
+            
             st.markdown("---")
             
             # 导出Excel
