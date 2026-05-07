@@ -50,6 +50,161 @@ def cat_level(level):
     elif level.startswith("总监"): return "总监"
     else: return level
 
+def generate_ai_analysis(r):
+    """生成AI智能分析报告"""
+    lines = []
+    
+    # 1. 整体概况
+    lines.append("## 📊 整体概况")
+    lines.append("")
+    主动离职 = 0
+    被动离职 = 0
+    if r["type"]:
+        for t in r["type"]:
+            if "主动" in str(t.get("离职类型", "")):
+                主动离职 = t.get("人数", 0)
+            elif "被动" in str(t.get("离职类型", "")):
+                被动离职 = t.get("人数", 0)
+    
+    rate_str = f"**{r['rate']}%**"
+    lines.append(f"- 分析周期：{r['month']}")
+    lines.append(f"- 离职率：{rate_str}（期间平均人数 {r['avg']} 人）")
+    lines.append(f"- 离职总人数：{r['turn']} 人（主动离职 {主动离职} 人，被动离职 {被动离职} 人）")
+    lines.append("")
+    
+    # 2. 主动离职分析
+    if 主动离职 > 0:
+        lines.append("## 💡 主动离职分析")
+        lines.append("")
+        # 找出主动离职的主要原因
+        main_reasons = []
+        if r["reason"]:
+            for reason in r["reason"][:5]:
+                main_reasons.append(f"{reason['离职原因']}（{reason['人数']}人，占比{reason['占比']}%）")
+        
+        lines.append(f"主动离职主要原因：")
+        for reason in main_reasons:
+            lines.append(f"- {reason}")
+        lines.append("")
+        lines.append("**💼 建议措施：**")
+        lines.append("- 招聘环节强化对工作负荷及岗位挑战的识别")
+        lines.append("- 对在岗员工定期复盘职业路径匹配度")
+        lines.append("- 提前干预因预期落差或生活变动导致的主动性流失")
+        lines.append("")
+    
+    # 3. 被动离职分析
+    if 被动离职 > 0:
+        lines.append("## ⚠️ 被动离职分析")
+        lines.append("")
+        lines.append(f"- 被动离职 {被动离职} 人，占比 {round(被动离职/r['turn']*100, 1)}%")
+        lines.append("")
+        lines.append("**🔧 建议措施：**")
+        lines.append("- 加强候选人能力匹配度评估")
+        lines.append("- 强化试用期过程预警与低绩效员工改进辅导")
+        lines.append("- 因架构调整终止合约时落实妥善交接与职业缓冲支持")
+        lines.append("")
+    
+    # 4. 部门风险分析
+    if r["dept"]:
+        lines.append("## 🏢 部门离职风险分析")
+        lines.append("")
+        high_risk = [d for d in r["dept"] if d["离职率"] >= 5]
+        medium_risk = [d for d in r["dept"] if 2 <= d["离职率"] < 5]
+        
+        if high_risk:
+            lines.append("**🔴 高风险部门（离职率≥5%）：**")
+            for d in high_risk:
+                lines.append(f"- **{d['一级组织']}**：离职 {d['离职人数']} 人，离职率 {d['离职率']}%，需重点关注")
+            lines.append("")
+        
+        if medium_risk:
+            lines.append("**🟡 中风险部门（离职率2%-5%）：**")
+            for d in medium_risk:
+                lines.append(f"- {d['一级组织']}：离职 {d['离职人数']} 人，离职率 {d['离职率']}%")
+            lines.append("")
+    
+    # 5. 司龄分析
+    if r["tenure"]:
+        lines.append("## 📅 司龄分布分析")
+        lines.append("")
+        new_employee = 0
+        for t in r["tenure"]:
+            if "0.5" in t["司龄段"]:
+                new_employee = t["人数"]
+                break
+        
+        if new_employee > 0:
+            lines.append(f"- 新人（司龄≤0.5年）离职 {new_employee} 人，需关注新员工适应性")
+        
+        # 找出离职最多的司龄段
+        if r["tenure"]:
+            top_tenure = max(r["tenure"], key=lambda x: x["人数"])
+            lines.append(f"- 离职最多司龄段：{top_tenure['司龄段']}（{top_tenure['人数']}人，占比{top_tenure['占比']}%）")
+        lines.append("")
+        lines.append("**🎯 建议措施：**")
+        lines.append("- 新员工入职引导与岗位匹配度评估")
+        lines.append("- 关注1-3年员工的职业发展通道")
+        lines.append("- 建立人才梯队储备机制")
+        lines.append("")
+    
+    # 6. 职级分析
+    if r["level"]:
+        lines.append("## 👥 职级分布分析")
+        lines.append("")
+        for level in r["level"][:5]:
+            lines.append(f"- **{level['职级合并']}**：{level['人数']}人（占比{level['占比']}%）")
+        lines.append("")
+        
+        # 中坚力量分析
+        middle_level = [l for l in r["level"] if l["职级合并"] in ["中级", "高级"]]
+        if middle_level:
+            total_middle = sum(l["人数"] for l in middle_level)
+            lines.append(f"**⚡ 中坚力量（中级+高级）流失：**{total_middle}人，占比{round(total_middle/r['turn']*100, 1)}%")
+            if total_middle / r["turn"] > 0.5:
+                lines.append("> ⚠️ 中坚力量流失严重，需关注人才梯队断层风险")
+        lines.append("")
+    
+    # 7. 风险预警
+    lines.append("## 🚨 风险预警")
+    lines.append("")
+    risks = []
+    
+    if r["rate"] > 5:
+        risks.append(f"- 离职率{r['rate']}%偏高，超过安全阈值5%")
+    
+    if 被动离职 / r["turn"] > 0.3 if r["turn"] > 0 else False:
+        risks.append(f"- 被动离职占比{round(被动离职/r['turn']*100, 1)}%较高，可能存在招聘评估或绩效管理问题")
+    
+    if r["dept"] and any(d["离职率"] > 8 for d in r["dept"]):
+        risks.append("- 存在离职率过高的部门，建议深入调研原因")
+    
+    if r["tenure"]:
+        new_rate = sum(t["人数"] for t in r["tenure"] if "0.5" in t["司龄段"]) / r["turn"] if r["turn"] > 0 else 0
+        if new_rate > 0.3:
+            risks.append(f"- 新人离职率{round(new_rate*100, 1)}%偏高，需改善新员工体验")
+    
+    if risks:
+        for risk in risks:
+            lines.append(risk)
+    else:
+        lines.append("- 当前离职率在可控范围内")
+    lines.append("")
+    
+    # 8. 改善建议
+    lines.append("## ✅ 综合改善建议")
+    lines.append("")
+    lines.append("| 维度 | 建议措施 | 优先级 |")
+    lines.append("|------|----------|--------|")
+    lines.append("| 招聘 | 强化岗位匹配度评估，增加工作内容真实性预览 | 高 |")
+    lines.append("| 入职 | 完善新员工引导机制，关注前6个月留存 | 高 |")
+    lines.append("| 发展 | 建立职业发展双通道，定期职业路径回顾 | 中 |")
+    lines.append("| 绩效 | 强化绩效预警机制，及早干预低绩效员工 | 中 |")
+    lines.append("| 沟通 | 定期员工满意度调研，建立反馈渠道 | 中 |")
+    lines.append("| 梯队 | 建立关键岗位继任计划，防止人才断层 | 高 |")
+    lines.append("")
+    
+    return "\n".join(lines)
+
 class Proc:
     def __init__(self, xlsx):
         self.period = {}
@@ -246,6 +401,13 @@ if f:
                 st.plotly_chart(fig_level, use_container_width=True, config=get_download_config(r["month"] + "_职级分布"))
                 st.dataframe(df_level.rename(columns={"职级合并": "职级"}), use_container_width=True, hide_index=True)
             
+            st.markdown("---")
+            
+            # AI智能分析
+            st.subheader("AI智能分析")
+            with st.spinner("正在生成分析报告..."):
+                analysis = generate_ai_analysis(r)
+            st.markdown(analysis)
             st.markdown("---")
             
             # 导出Excel
