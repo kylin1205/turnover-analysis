@@ -102,62 +102,75 @@ def is_word_available():
     except ImportError:
         return False
 
-def export_to_pdf(analysis_text, month):
-    """将分析报告导出为 PDF"""
-    if not is_pdf_available():
-        return None
-    
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-    
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
-    
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='Title_CN', fontName='Helvetica', fontSize=18, alignment=1, spaceAfter=20))
-    styles.add(ParagraphStyle(name='Heading1_CN', fontName='Helvetica-Bold', fontSize=14, spaceBefore=15, spaceAfter=8))
-    styles.add(ParagraphStyle(name='Body_CN', fontName='Helvetica', fontSize=10, leading=14, spaceAfter=6))
-    
-    story = []
-    story.append(Paragraph(f"员工离职分析报告", styles['Title_CN']))
-    story.append(Paragraph(f"{month} | 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Body_CN']))
-    story.append(Spacer(1, 0.5*cm))
-    
-    lines = analysis_text.split('\n')
+def _md_to_html(md_text):
+    """Markdown转HTML（无依赖）"""
+    html = []
+    lines = md_text.split('\n')
+    table_rows = []
+    in_table = False
     for line in lines:
         line = line.strip()
         if not line:
-            story.append(Spacer(1, 0.2*cm))
+            html.append('<br><br>')
             continue
-        if line.startswith('## '):
-            story.append(Paragraph(line.replace('## ', ''), styles['Heading1_CN']))
-        elif line.startswith('# '):
-            story.append(Paragraph(line, styles['Title_CN']))
-        elif line.startswith('**') and line.endswith('**'):
-            story.append(Paragraph(line, styles['Heading1_CN']))
-        elif line.startswith('- ') or line.startswith('* '):
-            story.append(Paragraph(line, styles['Body_CN']))
-        elif line.startswith('>'):
-            story.append(Paragraph(line.replace('>', '').strip(), styles['Body_CN']))
-        elif line.startswith('|'):
+        if line.startswith('|') and line.endswith('|'):
+            if '---' not in line:
+                cells = [c.strip() for c in line.split('|')[1:-1]]
+                table_rows.append(cells)
             continue
         else:
-            story.append(Paragraph(line, styles['Body_CN']))
-    
-    doc.build(story)
-    buffer.seek(0)
-    return buffer.getvalue()
+            if table_rows:
+                in_table = False
+                html.append('<table style="width:100%;border-collapse:collapse;"><thead><tr>')
+                for c in table_rows[0]:
+                    html.append(f'<th style="border:1px solid #ddd;padding:8px;background:#4F46E5;color:white;">{c}</th>')
+                html.append('</tr></thead><tbody>')
+                for row in table_rows[1:]:
+                    html.append('<tr>')
+                    for c in row:
+                        html.append(f'<td style="border:1px solid #ddd;padding:8px;text-align:center;">{c}</td>')
+                    html.append('</tr>')
+                html.append('</tbody></table><br>')
+                table_rows = []
+        if line.startswith('## '):
+            html.append(f'<h2 style="color:#4F46E5;border-bottom:2px solid #E0E7FF;padding-bottom:8px;margin:20px 0 10px;">{line[3:]}</h2>')
+        elif line.startswith('**') and line.endswith('**'):
+            html.append(f'<h3 style="color:#7C3AED;margin:15px 0 8px;">{line[2:-2]}</h3>')
+        elif line.startswith('- '):
+            html.append(f'<li style="margin:6px 0;">{line[2:]}</li>')
+        else:
+            html.append(f'<p style="margin:8px 0;">{line}</p>')
+    return ''.join(html)
+
+def export_to_pdf(analysis_text, month):
+    """导出为HTML（浏览器Ctrl+P打印为PDF）"""
+    html = f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>员工离职分析报告</title>
+<style>
+    body {{ font-family: "Microsoft YaHei", "PingFang SC", sans-serif; font-size: 12px; line-height: 1.8; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
+    .header {{ background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); color: white; padding: 30px; text-align: center; border-radius: 10px; margin-bottom: 30px; }}
+    .header h1 {{ margin: 0 0 10px; font-size: 24px; }}
+    .footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; color: #888; font-size: 10px; }}
+    @media print {{ body {{ padding: 0; }} .noprint {{ display: none; }} }}
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>员工离职分析报告</h1>
+    <p>{month} | {datetime.now().strftime("%Y-%m-%d %H:%M")}</p>
+</div>
+<div class="content">{_md_to_html(analysis_text)}</div>
+<div class="footer"><p>本报告由 AI 自动生成</p></div>
+</body>
+</html>'''
+    return html.encode('utf-8')
 
 def export_to_word(analysis_text, month, data_summary=None):
-    """将分析报告导出为 Word"""
-    if not is_word_available():
-        return None
-    
-    from docx import Document
-    from docx.shared import Pt, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGR
+    """导出为HTML（Word可直接打开，或打印为PDF）"""
+    return export_to_pdf(analysis_text, month)
 
 def get_data_summary(r):
     """获取数据摘要文本"""
