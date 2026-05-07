@@ -1,14 +1,18 @@
 """
-员工离职数据分析系统 - Streamlit Cloud版本
+员工离职数据分析系统 - Streamlit Cloud版本 V3.0
 """
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import re
 from io import BytesIO
 import warnings
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="员工离职数据分析", layout="wide")
+
+COLORS = {"primary": "#4F46E5", "danger": "#EF4444", "warning": "#F59E0B", "purple": "#8B5CF6", "success": "#10B981"}
 
 def get_month_str(n):
     return "2026年" + str(n).zfill(2) + "月"
@@ -21,37 +25,31 @@ def cat_tenure(y):
     elif y <= 5: return "3-5年"
     else: return "5年以上"
 
+def cat_level(level):
+    if pd.isna(level): return "未知"
+    level = str(level).strip()
+    if level.startswith("中"): return "中级"
+    elif level.startswith("高"): return "高级"
+    elif level.startswith("初"): return "初级"
+    elif level.startswith("资深"): return "资深"
+    elif level.startswith("总监"): return "总监"
+    else: return level
+
 class Proc:
     def __init__(self, xlsx):
         self.period = {}
         self.turn = None
-        self.turn_months = []  # Store months for turnover data
-        
         for sh in xlsx.sheet_names:
             try:
                 df = pd.read_excel(xlsx, sheet_name=sh)
-                # Check if this is a turnover sheet (contains 离职 but not 期初/期末)
                 if "离职" in sh and "期初" not in sh and "期末" not in sh:
                     self.turn = df.copy()
-                    # Extract month from sheet name (e.g., "4月离职人员" -> 4)
                     m = re.search(r"^(\d{1,2})月", sh)
                     if m:
-                        self.turn_months.append(int(m.group(1)))
-                    # If no "最后工作日" column, add a dummy month column based on sheet name
-                    if "最后工作日" not in df.columns and "离职日期" not in df.columns:
-                        if m:
-                            self.turn["离职月份"] = get_month_str(int(m.group(1)))
-                        else:
-                            # Try other date columns
-                            for col in df.columns:
-                                if "日期" in col or "日期" in col:
-                                    df[col] = pd.to_datetime(df[col], errors="coerce")
-                                    self.turn["离职月份"] = df[col].dt.strftime("%Y年%m月")
-                                    break
-                    else:
-                        date_col = "最后工作日" if "最后工作日" in df.columns else "离职日期"
-                        self.turn[date_col] = pd.to_datetime(self.turn[date_col], errors="coerce")
-                        self.turn["离职月份"] = self.turn[date_col].dt.strftime("%Y年%m月")
+                        self.turn["离职月份"] = get_month_str(int(m.group(1)))
+                    elif "最后工作日" in df.columns:
+                        self.turn["最后工作日"] = pd.to_datetime(self.turn["最后工作日"], errors="coerce")
+                        self.turn["离职月份"] = self.turn["最后工作日"].dt.strftime("%Y年%m月")
                     continue
                 m = re.search(r"^(\d{1,2})月", sh)
                 if not m: continue
@@ -67,8 +65,7 @@ class Proc:
                 if "期初" in sh:
                     if om not in self.period: self.period[om] = {"s": None, "e": None}
                     self.period[om]["s"] = df
-            except Exception as e:
-                print(f"Error processing sheet {sh}: {e}")
+            except: pass
     
     def months(self):
         return sorted([m for m in self.period.keys() if self.period[m]["s"] is not None])
@@ -101,9 +98,10 @@ class Proc:
         da = []
         for dept in set(list(ds.keys()) + list(de.keys()) + list(dt.keys())):
             d, e, t = ds.get(dept, 0), de.get(dept, 0), dt.get(dept, 0)
-            a = (d + e) / 2
-            r = round((t / a * 100), 2) if a > 0 else 0
-            da.append({"一级组织": dept, "期初人数": d, "期末人数": e, "平均人数": round(a, 1), "离职人数": t, "离职率": r})
+            if t > 0:
+                a = (d + e) / 2
+                r = round((t / a * 100), 2) if a > 0 else 0
+                da.append({"一级组织": dept, "期初人数": d, "期末人数": e, "平均人数": round(a, 1), "离职人数": t, "离职率": r})
         da = sorted(da, key=lambda x: x["离职率"], reverse=True)
         td = []
         if len(all_t) > 0 and "离职类型" in all_t.columns:
@@ -114,7 +112,7 @@ class Proc:
         if len(all_t) > 0 and "离职原因" in all_t.columns:
             r = all_t.groupby("离职原因").size().reset_index(name="人数")
             r["占比"] = round(r["人数"] / tt * 100, 2) if tt > 0 else 0
-            rd = r.sort_values("人数", ascending=False).to_dict("records")
+            rd = r.sort_values("人数", ascending=False).head(10).to_dict("records")
         ted = []
         if len(all_t) > 0 and "累计司龄（年）" in all_t.columns:
             tmp = all_t.copy()
@@ -124,12 +122,14 @@ class Proc:
             ted = t.sort_values("人数", ascending=False).to_dict("records")
         ld = []
         if len(all_t) > 0 and "职级" in all_t.columns:
-            l = all_t.groupby("职级").size().reset_index(name="人数")
+            tmp = all_t.copy()
+            tmp["职级合并"] = tmp["职级"].apply(cat_level)
+            l = tmp.groupby("职级合并").size().reset_index(name="人数")
             l["占比"] = round(l["人数"] / tt * 100, 2) if tt > 0 else 0
             ld = l.sort_values("人数", ascending=False).to_dict("records")
         return {"month": lbl, "avg": round(avg, 1), "start": ts, "end": te, "turn": tt, "rate": rate, "dept": da, "type": td, "reason": rd, "tenure": ted, "level": ld}
 
-st.markdown('<div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;"><h2 style="color: white; margin: 0;">员工离职数据分析系统</h2></div>', unsafe_allow_html=True)
+st.markdown('<div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px;"><h2 style="color: white; margin: 0;">员工离职数据分析系统 V3.0</h2></div>', unsafe_allow_html=True)
 
 st.header("数据导入")
 f = st.file_uploader("上传Excel文件", type=["xlsx", "xls"])
@@ -155,33 +155,89 @@ if f:
         
         if st.button("分析", type="primary"):
             r = p.analyze(sel_mns)
+            
+            st.subheader("关键指标")
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("月份", r["month"])
-            c2.metric("平均人数", r["avg"])
-            c3.metric("离职人数", r["turn"])
+            c1.metric("分析月份", r["month"])
+            c2.metric("平均人数", str(r["avg"]) + "人")
+            c3.metric("离职人数", str(r["turn"]) + "人")
             c4.metric("离职率", str(r["rate"]) + "%")
+            
+            st.divider()
             
             if r["dept"]:
                 st.subheader("各部门离职分析")
-                st.dataframe(pd.DataFrame(r["dept"]), use_container_width=True, hide_index=True)
+                df_dept = pd.DataFrame(r["dept"])
+                
+                fig = go.Figure()
+                fig.add_trace(go.Bar(x=df_dept["一级组织"], y=df_dept["离职人数"], name="离职人数",
+                    marker_color=COLORS["primary"], text=df_dept["离职人数"], textposition="outside"))
+                fig.add_trace(go.Scatter(x=df_dept["一级组织"], y=df_dept["离职率"], name="离职率(%)",
+                    marker_color=COLORS["danger"], text=[f"{x:.2f}%" for x in df_dept["离职率"]],
+                    textposition="top center", yaxis="y2", mode="lines+markers+text"))
+                fig.update_layout(xaxis=dict(title="部门", tickangle=-45),
+                    yaxis=dict(title="离职人数", title_font=dict(color=COLORS["primary"])),
+                    yaxis2=dict(title="离职率(%)", title_font=dict(color=COLORS["danger"]), overlaying="y", side="right"),
+                    legend=dict(x=0.5, y=1.1, xanchor="center", orientation="h"), height=400, margin=dict(b=100))
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(df_dept, use_container_width=True, hide_index=True)
+            
+            st.divider()
             
             if r["type"]:
                 st.subheader("离职类型分布")
-                st.dataframe(pd.DataFrame(r["type"]), use_container_width=True, hide_index=True)
+                df_type = pd.DataFrame(r["type"]).copy()
+                for idx, row in df_type.iterrows():
+                    if "主动" in str(row.get("离职类型", "")):
+                        df_type.loc[idx, "离职类型"] = "主动离职"
+                    elif "被动" in str(row.get("离职类型", "")):
+                        df_type.loc[idx, "离职类型"] = "被动离职"
+                merged = df_type.groupby("离职类型")["人数"].sum().reset_index()
+                merged["占比"] = round(merged["人数"] / r["turn"] * 100, 2)
+                
+                fig_pie = px.pie(merged, values="人数", names="离职类型", title="离职类型占比", hole=0.4,
+                    color_discrete_sequence=[COLORS["success"], COLORS["danger"]])
+                fig_pie.update_layout(height=400)
+                st.plotly_chart(fig_pie, use_container_width=True)
+                st.dataframe(df_type, use_container_width=True, hide_index=True)
             
-            if r["reason"]:
-                st.subheader("离职原因分布")
-                st.dataframe(pd.DataFrame(r["reason"]), use_container_width=True, hide_index=True)
+            st.divider()
             
             if r["tenure"]:
                 st.subheader("离职司龄分布")
-                st.dataframe(pd.DataFrame(r["tenure"]), use_container_width=True, hide_index=True)
+                df_tenure = pd.DataFrame(r["tenure"])
+                fig_tenure = px.pie(df_tenure, values="人数", names="司龄段", title="司龄分布", hole=0.4)
+                fig_tenure.update_layout(height=400)
+                st.plotly_chart(fig_tenure, use_container_width=True)
+                st.dataframe(df_tenure, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            
+            if r["reason"]:
+                st.subheader("离职原因分布")
+                df_reason = pd.DataFrame(r["reason"])
+                fig_reason = go.Figure()
+                fig_reason.add_trace(go.Bar(x=df_reason["人数"], y=df_reason["离职原因"], orientation="h",
+                    marker_color=COLORS["warning"], text=[f"{d}人({p}%)" for d, p in zip(df_reason["人数"], df_reason["占比"])], textposition="outside"))
+                fig_reason.update_layout(title="离职原因分布", xaxis_title="人数", yaxis_title="离职原因",
+                    height=max(300, len(df_reason) * 40), margin=dict(l=200))
+                st.plotly_chart(fig_reason, use_container_width=True)
+                st.dataframe(df_reason, use_container_width=True, hide_index=True)
+            
+            st.divider()
             
             if r["level"]:
-                st.subheader("职级分布")
-                st.dataframe(pd.DataFrame(r["level"]), use_container_width=True, hide_index=True)
+                st.subheader("职级分布（合并后）")
+                df_level = pd.DataFrame(r["level"])
+                fig_level = go.Figure()
+                fig_level.add_trace(go.Bar(x=df_level["职级合并"], y=df_level["人数"],
+                    marker_color=COLORS["purple"], text=[f"{d}人({p}%)" for d, p in zip(df_level["人数"], df_level["占比"])], textposition="outside"))
+                fig_level.update_layout(title="职级分布", xaxis_title="职级", yaxis_title="人数", height=400)
+                st.plotly_chart(fig_level, use_container_width=True)
+                st.dataframe(df_level.rename(columns={"职级合并": "职级"}), use_container_width=True, hide_index=True)
             
-            # Export
+            st.divider()
+            
             st.subheader("导出数据")
             out = BytesIO()
             with pd.ExcelWriter(out, engine="openpyxl") as w:
@@ -192,6 +248,7 @@ if f:
                 if r["tenure"]: pd.DataFrame(r["tenure"]).to_excel(w, sheet_name="司龄分布", index=False)
                 if r["level"]: pd.DataFrame(r["level"]).to_excel(w, sheet_name="职级分布", index=False)
             
-            st.download_button(label="下载Excel报告", data=out.getvalue(), file_name=r["month"] + "离职分析.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button(label="下载Excel报告", data=out.getvalue(), file_name=r["month"] + "离职分析.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
     st.info("请上传Excel文件开始分析")
