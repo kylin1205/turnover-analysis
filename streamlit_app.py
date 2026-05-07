@@ -205,8 +205,8 @@ if f:
                 merged["占比"] = round(merged["人数"] / r["turn"] * 100, 2)
                 
                 fig_pie = px.pie(merged, values="人数", names="离职类型", title="离职类型占比", color_discrete_sequence=[COLORS["success"], COLORS["danger"]], hole=0.5)
-                fig_pie.update_traces(textposition="outside", textinfo="label+percent", textfont=dict(size=16), marker=dict(line=dict(color="white", width=3)))
-                fig_pie.update_layout(title=dict(text="离职类型占比", font=dict(size=20)), height=500, legend=dict(font=dict(size=14)), annotations=[dict(text="离职类型", x=0.5, y=0.5, font_size=16, showarrow=False)])
+                fig_pie.update_traces(textposition="outside", textinfo="label+percent+value", textfont=dict(size=14), marker=dict(line=dict(color="white", width=3)), hovertemplate="<b>%{label}</b><br>人数: %{value}人<br>占比: %{percent}<extra></extra>")
+                fig_pie.update_layout(title=dict(text="离职类型分布", font=dict(size=20)), height=500, legend=dict(font=dict(size=14)))
                 st.plotly_chart(fig_pie, use_container_width=True, config=get_download_config(r["month"] + "_离职类型分布"))
                 st.dataframe(df_type, use_container_width=True, hide_index=True)
             
@@ -217,8 +217,8 @@ if f:
                 df_tenure = pd.DataFrame(r["tenure"])
                 
                 fig_tenure = px.pie(df_tenure, values="人数", names="司龄段", title="司龄分布", color_discrete_sequence=px.colors.qualitative.Set3, hole=0.5)
-                fig_tenure.update_traces(textposition="outside", textinfo="label+percent", textfont=dict(size=14), marker=dict(line=dict(color="white", width=3)))
-                fig_tenure.update_layout(title=dict(text="离职司龄分布", font=dict(size=20)), height=500, legend=dict(font=dict(size=14)), annotations=[dict(text="司龄", x=0.5, y=0.5, font_size=16, showarrow=False)])
+                fig_tenure.update_traces(textposition="outside", textinfo="label+percent+value", textfont=dict(size=13), marker=dict(line=dict(color="white", width=3)), hovertemplate="<b>%{label}</b><br>人数: %{value}人<br>占比: %{percent}<extra></extra>")
+                fig_tenure.update_layout(title=dict(text="离职司龄分布", font=dict(size=20)), height=500, legend=dict(font=dict(size=14)))
                 st.plotly_chart(fig_tenure, use_container_width=True, config=get_download_config(r["month"] + "_司龄分布"))
                 st.dataframe(df_tenure, use_container_width=True, hide_index=True)
             
