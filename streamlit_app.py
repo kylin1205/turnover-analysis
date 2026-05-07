@@ -86,8 +86,27 @@ def call_deepseek(prompt, system_prompt=None):
     except Exception as e:
         return f"API调用错误: {str(e)}"
 
+def is_pdf_available():
+    """检查 PDF 导出库是否可用"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        return True
+    except ImportError:
+        return False
+
+def is_word_available():
+    """检查 Word 导出库是否可用"""
+    try:
+        from docx import Document
+        return True
+    except ImportError:
+        return False
+
 def export_to_pdf(analysis_text, month):
     """将分析报告导出为 PDF"""
+    if not is_pdf_available():
+        return None
+    
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
@@ -133,91 +152,12 @@ def export_to_pdf(analysis_text, month):
 
 def export_to_word(analysis_text, month, data_summary=None):
     """将分析报告导出为 Word"""
+    if not is_word_available():
+        return None
+    
     from docx import Document
     from docx.shared import Pt, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.oxml.ns import qn
-    
-    doc = Document()
-    
-    style = doc.styles['Normal']
-    style.font.name = 'Microsoft YaHei'
-    style._element.rPr.rFonts.set(qn('w:eastAsia'), 'Microsoft YaHei')
-    style.font.size = Pt(11)
-    
-    title = doc.add_heading('员工离职分析报告', 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    subtitle = doc.add_paragraph()
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = subtitle.add_run(f"{month} | 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    run.font.size = Pt(10)
-    run.font.color.rgb = RGBColor(128, 128, 128)
-    
-    doc.add_paragraph()
-    
-    lines = analysis_text.split('\n')
-    in_table = False
-    table_rows = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            if in_table and table_rows:
-                in_table = False
-            continue
-        
-        if line.startswith('|') and line.endswith('|'):
-            if '---' not in line:
-                in_table = True
-                cells = [c.strip() for c in line.split('|')[1:-1]]
-                table_rows.append(cells)
-            continue
-        else:
-            if in_table and table_rows:
-                if table_rows:
-                    tbl = doc.add_table(rows=len(table_rows), cols=len(table_rows[0]))
-                    tbl.style = 'Table Grid'
-                    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-                    for i, row in enumerate(table_rows):
-                        for j, cell_text in enumerate(row):
-                            cell = tbl.rows[i].cells[j]
-                            cell.text = cell_text
-                            for para in cell.paragraphs:
-                                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    doc.add_paragraph()
-                table_rows = []
-                in_table = False
-        
-        if line.startswith('## '):
-            doc.add_heading(line.replace('## ', ''), level=2)
-        elif line.startswith('# '):
-            doc.add_heading(line.replace('# ', ''), level=1)
-        elif line.startswith('**') and line.endswith('**'):
-            p = doc.add_paragraph()
-            run = p.add_run(line.replace('**', ''))
-            run.bold = True
-        elif line.startswith('- ') or line.startswith('* '):
-            doc.add_paragraph(line, style='List Bullet')
-        elif line.startswith('>'):
-            doc.add_paragraph(line.replace('>', '').strip())
-        elif in_table:
-            pass
-        else:
-            doc.add_paragraph(line)
-    
-    if data_summary:
-        doc.add_page_break()
-        doc.add_heading('原始数据摘要', level=1)
-        p = doc.add_paragraph()
-        run = p.add_run(data_summary)
-        run.font.size = Pt(10)
-    
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer.getvalue()
+    from docx.enum.text import WD_ALIGN_PARAGR
 
 def get_data_summary(r):
     """获取数据摘要文本"""
@@ -517,34 +457,39 @@ if f:
             col1, col2, col3 = st.columns(3)
             data_summary = get_data_summary(r)
             
+            # 检查库可用性
+            pdf_ok = is_pdf_available()
+            word_ok = is_word_available()
+            
             with col1:
-                # PDF 导出
-                try:
+                if pdf_ok:
                     pdf_bytes = export_to_pdf(analysis, r["month"])
-                    st.download_button(
-                        label="📄 下载 PDF 报告",
-                        data=pdf_bytes,
-                        file_name=r["month"] + "离职分析报告.pdf",
-                        mime="application/pdf"
-                    )
-                except Exception as e:
-                    st.error(f"PDF导出失败: {str(e)}")
+                    if pdf_bytes:
+                        st.download_button(
+                            label="📄 下载 PDF 报告",
+                            data=pdf_bytes,
+                            file_name=r["month"] + "离职分析报告.pdf",
+                            mime="application/pdf"
+                        )
+                else:
+                    st.button("📄 PDF报告 (需安装reportlab)", disabled=True)
+                    st.caption("提示: 请在本地运行以使用PDF导出")
             
             with col2:
-                # Word 导出
-                try:
+                if word_ok:
                     word_bytes = export_to_word(analysis, r["month"], data_summary)
-                    st.download_button(
-                        label="📝 下载 Word 报告",
-                        data=word_bytes,
-                        file_name=r["month"] + "离职分析报告.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-                except Exception as e:
-                    st.error(f"Word导出失败: {str(e)}")
+                    if word_bytes:
+                        st.download_button(
+                            label="📝 下载 Word 报告",
+                            data=word_bytes,
+                            file_name=r["month"] + "离职分析报告.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+                else:
+                    st.button("📝 Word报告 (需安装docx)", disabled=True)
+                    st.caption("提示: 请在本地运行以使用Word导出")
             
             with col3:
-                # Markdown 导出
                 md_content = f"# 员工离职分析报告\n\n{r['month']}\n\n{analysis}\n\n---\n\n## 原始数据\n\n{data_summary}"
                 st.download_button(
                     label="📋 下载 Markdown",
@@ -552,6 +497,24 @@ if f:
                     file_name=r["month"] + "离职分析报告.md",
                     mime="text/markdown"
                 )
+            
+            # 如果缺少依赖，显示提示
+            if not pdf_ok or not word_ok:
+                with st.expander("💡 关于报告导出"):
+                    st.info("""
+                    **PDF/Word 导出功能需要额外依赖库：**
+                    - `reportlab` - 用于生成 PDF
+                    - `python-docx` - 用于生成 Word
+                    
+                    **本地部署方法：**
+                    ```bash
+                    pip install reportlab python-docx
+                    streamlit run streamlit_app.py
+                    ```
+                    
+                    **Streamlit Cloud 部署：**
+                    在 `requirements.txt` 中添加依赖后重新部署即可。
+                    """)
             
             st.markdown("---")
             
